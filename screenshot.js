@@ -32,7 +32,7 @@ async function run() {
   const screenshotPath = path.join(__dirname, "steam_homepage.png");
   await page.screenshot({
     path: screenshotPath,
-    clip: { x: 0, y: 0, width: 1920, height: 1080 },
+    fullPage: true,
   });
 
   await browser.close();
