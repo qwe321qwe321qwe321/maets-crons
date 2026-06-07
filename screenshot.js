@@ -44,10 +44,10 @@ async function run() {
     new Blob([imageBuffer], { type: "image/png" }),
     "steam_homepage.png"
   );
-  const today = new Date().toISOString().slice(0, 10);
+  const unixTs = Math.floor(Date.now() / 1000);
   formData.append(
     "payload_json",
-    JSON.stringify({ content: `Steam homepage · ${today}` })
+    JSON.stringify({ content: `Steam homepage · <t:${unixTs}:F>` })
   );
 
   const res = await fetch(webhookUrl, { method: "POST", body: formData });
