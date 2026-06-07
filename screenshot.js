@@ -29,6 +29,23 @@ async function run() {
     await page.waitForTimeout(500);
   }
 
+  // scroll to bottom to trigger lazy-load, then wait for images
+  await page.evaluate(async () => {
+    await new Promise((resolve) => {
+      const distance = 300;
+      const delay = 100;
+      const timer = setInterval(() => {
+        window.scrollBy(0, distance);
+        if (window.scrollY + window.innerHeight >= document.body.scrollHeight) {
+          clearInterval(timer);
+          resolve();
+        }
+      }, delay);
+    });
+  });
+  await page.waitForTimeout(10000);
+  await page.evaluate(() => window.scrollTo(0, 0));
+
   const screenshotPath = path.join(__dirname, "steam_homepage.png");
   await page.screenshot({
     path: screenshotPath,
@@ -56,7 +73,7 @@ async function run() {
   }
 
   fs.unlinkSync(screenshotPath);
-  console.log("Done:", today);
+  console.log("Done:", new Date().toISOString());
 }
 
 run().catch((err) => {
