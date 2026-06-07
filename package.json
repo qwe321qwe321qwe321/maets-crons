@@ -1,0 +1,11 @@
+{
+  "name": "maets-screenshot-cron",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "screenshot": "node screenshot.js"
+  },
+  "dependencies": {
+    "playwright": "^1.49.0"
+  }
+}
