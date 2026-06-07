@@ -44,6 +44,56 @@ async function run() {
     });
   });
   await page.waitForTimeout(10000);
+
+  // scrape store tabs before scrolling back
+  const tabData = await page.evaluate(() => {
+    const result = {
+      popularNewReleases: [],
+      topSellers: [],
+      popularUpcoming: [],
+      specials: [],
+      trendingFree: [],
+    };
+    const tabConfigs = [
+      { key: "popularNewReleases", id: "tab_newreleases_content" },
+      { key: "topSellers", id: "tab_topsellers_content" },
+      { key: "popularUpcoming", id: "tab_upcoming_content" },
+      { key: "specials", id: "tab_specials_content" },
+      { key: "trendingFree", id: "tab_trendingfree_content" },
+    ];
+    tabConfigs.forEach((config) => {
+      const container = document.getElementById(config.id);
+      if (!container) return;
+      container.querySelectorAll("a[data-ds-appid]").forEach((item) => {
+        const appId = item.getAttribute("data-ds-appid");
+        const titleElem =
+          item.querySelector(".tab_item_name") ||
+          item.querySelector(".title") ||
+          item.querySelector('[class*="name"]');
+        let name = titleElem
+          ? (titleElem.innerText || titleElem.textContent || "").trim()
+          : "";
+        if (!name) {
+          const img = item.querySelector("img");
+          name = img
+            ? (img.getAttribute("alt") || img.getAttribute("title") || "").trim()
+            : "";
+        }
+        if (!name) {
+          const textLines = (item.textContent || "")
+            .split("\n")
+            .map((t) => t.trim())
+            .filter((t) => t.length > 0 && !/^\d+$/.test(t) && !t.includes("%"));
+          name = textLines[0] || "";
+        }
+        if (appId && name && !result[config.key].some((t) => t.appId === appId)) {
+          result[config.key].push({ appId, name });
+        }
+      });
+    });
+    return result;
+  });
+
   await page.evaluate(() => window.scrollTo(0, 0));
 
   const screenshotPath = path.join(__dirname, "steam_homepage.png");
@@ -54,6 +104,9 @@ async function run() {
 
   await browser.close();
 
+  const unixTs = Math.floor(Date.now() / 1000);
+
+  // send screenshot
   const imageBuffer = fs.readFileSync(screenshotPath);
   const formData = new FormData();
   formData.append(
@@ -61,18 +114,47 @@ async function run() {
     new Blob([imageBuffer], { type: "image/png" }),
     "steam_homepage.png"
   );
-  const unixTs = Math.floor(Date.now() / 1000);
   formData.append(
     "payload_json",
     JSON.stringify({ content: `Steam homepage · <t:${unixTs}:F>` })
   );
-
   const res = await fetch(webhookUrl, { method: "POST", body: formData });
   if (!res.ok) {
     throw new Error(`Discord webhook failed: ${res.status} ${await res.text()}`);
   }
-
   fs.unlinkSync(screenshotPath);
+
+  // send store tabs as separate message
+  const tabLabels = [
+    { key: "popularNewReleases", label: "Popular New Releases" },
+    { key: "topSellers", label: "Top Sellers" },
+    { key: "popularUpcoming", label: "Popular Upcoming" },
+    { key: "specials", label: "Specials" },
+    { key: "trendingFree", label: "Trending Free" },
+  ];
+  const lines = [];
+  for (const { key, label } of tabLabels) {
+    lines.push(label);
+    const items = tabData[key];
+    if (items.length === 0) {
+      lines.push("  (no data)");
+    } else {
+      items.forEach((item, i) => {
+        lines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})`);
+      });
+    }
+    lines.push("");
+  }
+  const codeBlock = "```\n" + lines.join("\n").trimEnd() + "\n```";
+  const tabRes = await fetch(webhookUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ content: codeBlock }),
+  });
+  if (!tabRes.ok) {
+    throw new Error(`Discord tab message failed: ${tabRes.status} ${await tabRes.text()}`);
+  }
+
   console.log("Done:", new Date().toISOString());
 }
 
