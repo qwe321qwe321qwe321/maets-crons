@@ -105,6 +105,7 @@ async function run() {
   await browser.close();
 
   const unixTs = Math.floor(Date.now() / 1000);
+  const isoDate = new Date().toISOString().slice(0, 10);
 
   // send screenshot
   const imageBuffer = fs.readFileSync(screenshotPath);
@@ -116,7 +117,7 @@ async function run() {
   );
   formData.append(
     "payload_json",
-    JSON.stringify({ content: `Steam homepage · <t:${unixTs}:F>` })
+    JSON.stringify({ content: `Steam homepage · ${isoDate}\n<t:${unixTs}:F>` })
   );
   const res = await fetch(webhookUrl, { method: "POST", body: formData });
   if (!res.ok) {
