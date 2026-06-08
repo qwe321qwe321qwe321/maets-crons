@@ -27,6 +27,6 @@ jobs:
 
       - run: node screenshot.js
         env:
-          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           CHANNEL_IDS: ${{ inputs.channel_ids || secrets.CHANNEL_IDS }}
 
