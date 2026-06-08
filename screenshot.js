@@ -30,7 +30,7 @@ async function fetchJapanProxy() {
   return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password };
 }
 
-async function takeScreenshot(proxy, slug) {
+async function takeScreenshot(proxy, slug, cc) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -40,9 +40,20 @@ async function takeScreenshot(proxy, slug) {
     },
     ...(proxy ? { proxy } : {}),
   });
-  const page = await context.newPage();
 
-  await page.goto("https://store.steampowered.com/", {
+  // verify detected country before screenshotting
+  const checkPage = await context.newPage();
+  const countryRes = await checkPage.goto("https://store.steampowered.com/api/country", { timeout: 15000 });
+  const detectedCountry = await countryRes.text();
+  console.log(`[${slug}] detected country: ${detectedCountry.trim()}`);
+  await checkPage.close();
+
+  const page = await context.newPage();
+  const url = cc
+    ? `https://store.steampowered.com/?cc=${cc}`
+    : "https://store.steampowered.com/";
+
+  await page.goto(url, {
     waitUntil: "networkidle",
     timeout: 30000,
   });
@@ -211,12 +222,12 @@ async function run() {
   const isoDate = new Date().toISOString();
 
   console.log("Taking default screenshot...");
-  const { screenshotPath: defaultPath, tabData: defaultTabs } = await takeScreenshot(null, "default");
+  const { screenshotPath: defaultPath, tabData: defaultTabs } = await takeScreenshot(null, "default", null);
 
   console.log("Fetching JP proxy...");
   const jpProxy = await fetchJapanProxy();
   console.log("Taking JP screenshot...");
-  const { screenshotPath: jpPath, tabData: jpTabs } = await takeScreenshot(jpProxy, "japan");
+  const { screenshotPath: jpPath, tabData: jpTabs } = await takeScreenshot(jpProxy, "japan", "jp");
 
   for (const channelId of channelIds) {
     await postToChannel(channelId, botToken, defaultPath, defaultTabs, "🌐 Steam homepage · Default", unixTs, isoDate, false);
