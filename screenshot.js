@@ -20,13 +20,14 @@ async function d1(sql, params = []) {
 
 async function fetchJapanProxy() {
   const res = await fetch(
-    "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&country_code=JP&page_size=1",
+    "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=100",
     { headers: { Authorization: `Token ${process.env.WEBSHARE_API_KEY}` } }
   );
   if (!res.ok) throw new Error(`Webshare API failed: ${res.status}`);
   const json = await res.json();
-  const p = json.results?.[0];
+  const p = json.results?.find((r) => r.country_code === "JP" && r.valid);
   if (!p) throw new Error("No JP proxy available");
+  console.log(`Using JP proxy: ${p.proxy_address} (${p.city_name})`);
   return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password };
 }
 
