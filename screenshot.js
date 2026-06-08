@@ -45,8 +45,10 @@ async function takeScreenshot(proxy, slug, cc) {
   // verify outbound IP + city before screenshotting
   const checkPage = await context.newPage();
   const ipRes = await checkPage.goto("https://ipinfo.io/json", { timeout: 15000 });
-  const ipData = await ipRes.json();
-  const ipLabel = `${ipData.ip} (${ipData.city}, ${ipData.country})`;
+  const ipData = await ipRes.json().catch(() => ({}));
+  const ipLabel = ipData.ip
+    ? `${ipData.ip}${ipData.city ? ` (${ipData.city}, ${ipData.country})` : ""}`
+    : "unknown";
   console.log(`[${slug}] ${ipLabel}`);
   await checkPage.close();
 
