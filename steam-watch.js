@@ -154,10 +154,15 @@ async function runAppInfoRefresh() {
 	}
 }
 
-async function runDailyReport() {
-	const tracked = await d1(
-		'SELECT id, guild_id, channel_id, appid, app_name, coming_soon, release_date FROM tracked_apps WHERE enabled = 1'
-	);
+async function runDailyReport(filterChannelId = '') {
+	const tracked = filterChannelId
+		? await d1(
+			'SELECT id, guild_id, channel_id, appid, app_name, coming_soon, release_date FROM tracked_apps WHERE channel_id = ? AND enabled = 1',
+			[filterChannelId]
+		)
+		: await d1(
+			'SELECT id, guild_id, channel_id, appid, app_name, coming_soon, release_date FROM tracked_apps WHERE enabled = 1'
+		);
 	if (tracked.length === 0) return;
 
 	const uniqueAppIds = [...new Set(tracked.map(r => r.appid))];
@@ -279,12 +284,13 @@ async function runDailyReport() {
 }
 
 const job = process.argv[2];
+const filterChannelId = process.env.FILTER_CHANNEL_ID ?? '';
 if (job === 'refresh') {
 	console.log('Running app info refresh...');
 	runAppInfoRefresh().then(() => console.log('Done.')).catch(err => { console.error(err); process.exit(1); });
 } else if (job === 'report') {
-	console.log('Running daily report...');
-	runDailyReport().then(() => console.log('Done.')).catch(err => { console.error(err); process.exit(1); });
+	console.log(`Running daily report${filterChannelId ? ` for channel ${filterChannelId}` : ''}...`);
+	runDailyReport(filterChannelId).then(() => console.log('Done.')).catch(err => { console.error(err); process.exit(1); });
 } else {
 	console.error('Usage: node steam-watch.js <refresh|report>');
 	process.exit(1);

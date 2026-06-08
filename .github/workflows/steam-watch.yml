@@ -14,6 +14,10 @@ on:
         options:
           - refresh
           - report
+      channel_id:
+        description: "Discord channel ID to report (leave empty for all)"
+        required: false
+        default: ""
 
 jobs:
   run:
@@ -44,3 +48,4 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          FILTER_CHANNEL_ID: ${{ inputs.channel_id }}
