@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 1,13 * * *"
   workflow_dispatch:
+    inputs:
+      channel_ids:
+        description: "Comma-separated Discord channel IDs (leave empty to use CHANNEL_IDS secret)"
+        required: false
+        type: string
 
 jobs:
   screenshot:
@@ -22,5 +27,6 @@ jobs:
 
       - run: node screenshot.js
         env:
-          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_BOT_TOKEN: ${{ secrets.DISCORD_BOT_TOKEN }}
+          CHANNEL_IDS: ${{ inputs.channel_ids || secrets.CHANNEL_IDS }}
 
