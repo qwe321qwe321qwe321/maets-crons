@@ -105,7 +105,7 @@ async function run() {
   await browser.close();
 
   const unixTs = Math.floor(Date.now() / 1000);
-  const isoDate = new Date().toISOString().slice(0, 10);
+  const isoDate = new Date().toISOString();
 
   // send screenshot
   const imageBuffer = fs.readFileSync(screenshotPath);
