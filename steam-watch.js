@@ -283,15 +283,16 @@ async function runDailyReport(filterChannelId = '') {
 	}
 }
 
-const job = process.argv[2];
 const filterChannelId = process.env.FILTER_CHANNEL_ID ?? '';
-if (job === 'refresh') {
-	console.log('Running app info refresh...');
-	runAppInfoRefresh().then(() => console.log('Done.')).catch(err => { console.error(err); process.exit(1); });
-} else if (job === 'report') {
+
+async function main() {
+	if (!filterChannelId) {
+		console.log('Refreshing app info...');
+		await runAppInfoRefresh();
+	}
 	console.log(`Running daily report${filterChannelId ? ` for channel ${filterChannelId}` : ''}...`);
-	runDailyReport(filterChannelId).then(() => console.log('Done.')).catch(err => { console.error(err); process.exit(1); });
-} else {
-	console.error('Usage: node steam-watch.js <refresh|report>');
-	process.exit(1);
+	await runDailyReport(filterChannelId);
+	console.log('Done.');
 }
+
+main().catch(err => { console.error(err); process.exit(1); });
