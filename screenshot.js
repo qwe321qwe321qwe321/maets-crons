@@ -41,11 +41,11 @@ async function takeScreenshot(proxy, slug, cc) {
     ...(proxy ? { proxy } : {}),
   });
 
-  // verify detected country before screenshotting
+  // verify outbound IP / country before screenshotting
   const checkPage = await context.newPage();
-  const countryRes = await checkPage.goto("https://store.steampowered.com/api/country", { timeout: 15000 });
-  const detectedCountry = await countryRes.text();
-  console.log(`[${slug}] detected country: ${detectedCountry.trim()}`);
+  const ipRes = await checkPage.goto("https://ipapi.co/json/", { timeout: 15000 });
+  const ipData = await ipRes.json();
+  console.log(`[${slug}] ip: ${ipData.ip}, country: ${ipData.country_code}`);
   await checkPage.close();
 
   const page = await context.newPage();
