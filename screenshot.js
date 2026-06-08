@@ -27,11 +27,12 @@ async function fetchProxyByCountry(countryCode) {
   const json = await res.json();
   const p = json.results?.find((r) => r.country_code === countryCode && r.valid);
   if (!p) throw new Error(`No ${countryCode} proxy available`);
-  console.log(`Using ${countryCode} proxy: ${p.proxy_address} (${p.city_name})`);
-  return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password };
+  const ipLabel = `${p.proxy_address} (${p.city_name}, ${p.country_code})`;
+  console.log(`Using ${countryCode} proxy: ${ipLabel}`);
+  return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password, ipLabel };
 }
 
-async function takeScreenshot(proxy, slug, cc, locale = "en-US") {
+async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -42,15 +43,17 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US") {
     ...(proxy ? { proxy } : {}),
   });
 
-  // verify outbound IP + city before screenshotting
-  const checkPage = await context.newPage();
-  const ipRes = await checkPage.goto("https://ipinfo.io/json", { timeout: 15000 });
-  const ipData = await ipRes.json().catch(() => ({}));
-  const ipLabel = ipData.ip
-    ? `${ipData.ip}${ipData.city ? ` (${ipData.city}, ${ipData.country})` : ""}`
-    : "unknown";
+  let ipLabel = knownIpLabel;
+  if (!ipLabel) {
+    const checkPage = await context.newPage();
+    const ipRes = await checkPage.goto("https://ipinfo.io/json", { timeout: 15000 });
+    const ipData = await ipRes.json().catch(() => ({}));
+    ipLabel = ipData.ip
+      ? `${ipData.ip}${ipData.city ? ` (${ipData.city}, ${ipData.country})` : ""}`
+      : "unknown";
+    await checkPage.close();
+  }
   console.log(`[${slug}] ${ipLabel}`);
-  await checkPage.close();
 
   const page = await context.newPage();
   const params = new URLSearchParams();
@@ -233,12 +236,12 @@ async function run() {
   console.log("Fetching GB proxy...");
   const gbProxy = await fetchProxyByCountry("GB");
   console.log("Taking GB screenshot...");
-  const { screenshotPath: gbPath, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb", "en-GB");
+  const { screenshotPath: gbPath, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb", "en-GB", gbProxy.ipLabel);
 
   console.log("Fetching JP proxy...");
   const jpProxy = await fetchProxyByCountry("JP");
   console.log("Taking JP screenshot...");
-  const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP");
+  const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP", jpProxy.ipLabel);
 
   for (const channelId of channelIds) {
     await postToChannel(channelId, botToken, defaultPath, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
