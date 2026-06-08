@@ -18,16 +18,16 @@ async function d1(sql, params = []) {
   return json.result[0].results;
 }
 
-async function fetchJapanProxy() {
+async function fetchProxyByCountry(countryCode) {
   const res = await fetch(
     "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=100",
     { headers: { Authorization: `Token ${process.env.WEBSHARE_API_KEY}` } }
   );
   if (!res.ok) throw new Error(`Webshare API failed: ${res.status}`);
   const json = await res.json();
-  const p = json.results?.find((r) => r.country_code === "JP" && r.valid);
-  if (!p) throw new Error("No JP proxy available");
-  console.log(`Using JP proxy: ${p.proxy_address} (${p.city_name})`);
+  const p = json.results?.find((r) => r.country_code === countryCode && r.valid);
+  if (!p) throw new Error(`No ${countryCode} proxy available`);
+  console.log(`Using ${countryCode} proxy: ${p.proxy_address} (${p.city_name})`);
   return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password };
 }
 
@@ -226,15 +226,23 @@ async function run() {
   console.log("Taking default screenshot...");
   const { screenshotPath: defaultPath, tabData: defaultTabs, ipLabel: defaultIp } = await takeScreenshot(null, "default", null);
 
+  console.log("Fetching GB proxy...");
+  const gbProxy = await fetchProxyByCountry("GB");
+  console.log("Taking GB screenshot...");
+  const { screenshotPath: gbPath, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb");
+
   console.log("Fetching JP proxy...");
-  const jpProxy = await fetchJapanProxy();
+  const jpProxy = await fetchProxyByCountry("JP");
   console.log("Taking JP screenshot...");
   const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp");
 
   for (const channelId of channelIds) {
     await postToChannel(channelId, botToken, defaultPath, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, gbPath, gbTabs, `🇬🇧 Steam homepage · UK · \`${gbIp}\``, unixTs, isoDate, false);
     await postToChannel(channelId, botToken, jpPath, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, true);
   }
+
+  fs.unlinkSync(gbPath);
 
   fs.unlinkSync(defaultPath);
   fs.unlinkSync(jpPath);
