@@ -31,11 +31,11 @@ async function fetchProxyByCountry(countryCode) {
   return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password };
 }
 
-async function takeScreenshot(proxy, slug, cc) {
+async function takeScreenshot(proxy, slug, cc, locale = "en-US") {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
-    locale: "en-US",
+    locale,
     extraHTTPHeaders: {
       Cookie: "birthtime=0; lastagecheckage=1-0-1990; mature_content=1",
     },
@@ -53,9 +53,11 @@ async function takeScreenshot(proxy, slug, cc) {
   await checkPage.close();
 
   const page = await context.newPage();
-  const url = cc
-    ? `https://store.steampowered.com/?cc=${cc}`
-    : "https://store.steampowered.com/";
+  const params = new URLSearchParams();
+  if (cc) params.set("cc", cc);
+  if (locale !== "en-US") params.set("l", locale.split("-")[0] === "ja" ? "japanese" : locale.split("-")[0]);
+  const query = params.toString();
+  const url = `https://store.steampowered.com/${query ? `?${query}` : ""}`;
 
   await page.goto(url, {
     waitUntil: "networkidle",
@@ -231,12 +233,12 @@ async function run() {
   console.log("Fetching GB proxy...");
   const gbProxy = await fetchProxyByCountry("GB");
   console.log("Taking GB screenshot...");
-  const { screenshotPath: gbPath, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb");
+  const { screenshotPath: gbPath, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb", "en-GB");
 
   console.log("Fetching JP proxy...");
   const jpProxy = await fetchProxyByCountry("JP");
   console.log("Taking JP screenshot...");
-  const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp");
+  const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP");
 
   for (const channelId of channelIds) {
     await postToChannel(channelId, botToken, defaultPath, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
