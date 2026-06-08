@@ -18,23 +18,19 @@ async function d1(sql, params = []) {
   return json.result[0].results;
 }
 
-async function run() {
-  const botToken = process.env.DISCORD_TOKEN;
-  if (!botToken) throw new Error("DISCORD_TOKEN not set");
+async function fetchJapanProxy() {
+  const res = await fetch(
+    "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&country_code=JP&page_size=1",
+    { headers: { Authorization: `Token ${process.env.WEBSHARE_API_KEY}` } }
+  );
+  if (!res.ok) throw new Error(`Webshare API failed: ${res.status}`);
+  const json = await res.json();
+  const p = json.results?.[0];
+  if (!p) throw new Error("No JP proxy available");
+  return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password };
+}
 
-  let channelIds;
-  const channelIdsRaw = process.env.CHANNEL_IDS;
-  if (channelIdsRaw) {
-    channelIds = channelIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
-  } else {
-    const rows = await d1("SELECT channel_id FROM screenshot_channels");
-    channelIds = rows.map((r) => r.channel_id);
-  }
-  if (channelIds.length === 0) {
-    console.log("No channels subscribed, skipping.");
-    return;
-  }
-
+async function takeScreenshot(proxy, slug) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -42,6 +38,7 @@ async function run() {
     extraHTTPHeaders: {
       Cookie: "birthtime=0; lastagecheckage=1-0-1990; mature_content=1",
     },
+    ...(proxy ? { proxy } : {}),
   });
   const page = await context.newPage();
 
@@ -121,13 +118,14 @@ async function run() {
 
   await page.evaluate(() => window.scrollTo(0, 0));
 
-  const screenshotPath = path.join(__dirname, "steam_homepage.png");
+  const screenshotPath = path.join(__dirname, `steam_homepage_${slug}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await browser.close();
 
-  const unixTs = Math.floor(Date.now() / 1000);
-  const isoDate = new Date().toISOString();
+  return { screenshotPath, tabData };
+}
 
+async function postToChannel(channelId, botToken, screenshotPath, tabData, label, unixTs, isoDate, showButton) {
   const tabLabels = [
     { key: "popularNewReleases", label: "Popular New Releases" },
     { key: "topSellers", label: "Top Sellers" },
@@ -136,8 +134,8 @@ async function run() {
     { key: "trendingFree", label: "Trending Free" },
   ];
   const lines = [];
-  for (const { key, label } of tabLabels) {
-    lines.push(label);
+  for (const { key, label: tabLabel } of tabLabels) {
+    lines.push(tabLabel);
     const items = tabData[key];
     if (items.length === 0) {
       lines.push("  (no data)");
@@ -150,8 +148,6 @@ async function run() {
   }
   const codeBlock = "```\n" + lines.join("\n").trimEnd() + "\n```";
 
-  const imageBuffer = fs.readFileSync(screenshotPath);
-
   const CAPTURE_NOW_BUTTON = {
     type: 1,
     components: [{
@@ -163,34 +159,72 @@ async function run() {
     }],
   };
 
-  for (const channelId of channelIds) {
-    const formData = new FormData();
-    formData.append("file", new Blob([imageBuffer], { type: "image/png" }), "steam_homepage.png");
-    formData.append(
-      "payload_json",
-      JSON.stringify({ content: `Steam homepage · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 })
-    );
-    const imgRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bot ${botToken}` },
-      body: formData,
-    });
-    if (!imgRes.ok) {
-      console.error(`Image post failed for ${channelId}: ${imgRes.status} ${await imgRes.text()}`);
-      continue;
-    }
-
-    const tabRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ content: codeBlock, flags: 4, components: [CAPTURE_NOW_BUTTON] }),
-    });
-    if (!tabRes.ok) {
-      console.error(`Tab post failed for ${channelId}: ${tabRes.status} ${await tabRes.text()}`);
-    }
+  const imageBuffer = fs.readFileSync(screenshotPath);
+  const formData = new FormData();
+  formData.append("file", new Blob([imageBuffer], { type: "image/png" }), "steam_homepage.png");
+  formData.append(
+    "payload_json",
+    JSON.stringify({ content: `${label} · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 })
+  );
+  const imgRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bot ${botToken}` },
+    body: formData,
+  });
+  if (!imgRes.ok) {
+    console.error(`Image post failed for ${channelId}: ${imgRes.status} ${await imgRes.text()}`);
+    return;
   }
 
-  fs.unlinkSync(screenshotPath);
+  const tabRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: codeBlock,
+      flags: 4,
+      ...(showButton ? { components: [CAPTURE_NOW_BUTTON] } : {}),
+    }),
+  });
+  if (!tabRes.ok) {
+    console.error(`Tab post failed for ${channelId}: ${tabRes.status} ${await tabRes.text()}`);
+  }
+}
+
+async function run() {
+  const botToken = process.env.DISCORD_TOKEN;
+  if (!botToken) throw new Error("DISCORD_TOKEN not set");
+
+  let channelIds;
+  const channelIdsRaw = process.env.CHANNEL_IDS;
+  if (channelIdsRaw) {
+    channelIds = channelIdsRaw.split(",").map((s) => s.trim()).filter(Boolean);
+  } else {
+    const rows = await d1("SELECT channel_id FROM screenshot_channels");
+    channelIds = rows.map((r) => r.channel_id);
+  }
+  if (channelIds.length === 0) {
+    console.log("No channels subscribed, skipping.");
+    return;
+  }
+
+  const unixTs = Math.floor(Date.now() / 1000);
+  const isoDate = new Date().toISOString();
+
+  console.log("Taking default screenshot...");
+  const { screenshotPath: defaultPath, tabData: defaultTabs } = await takeScreenshot(null, "default");
+
+  console.log("Fetching JP proxy...");
+  const jpProxy = await fetchJapanProxy();
+  console.log("Taking JP screenshot...");
+  const { screenshotPath: jpPath, tabData: jpTabs } = await takeScreenshot(jpProxy, "japan");
+
+  for (const channelId of channelIds) {
+    await postToChannel(channelId, botToken, defaultPath, defaultTabs, "🌐 Steam homepage · Default", unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, jpPath, jpTabs, "🇯🇵 Steam homepage · Japan", unixTs, isoDate, true);
+  }
+
+  fs.unlinkSync(defaultPath);
+  fs.unlinkSync(jpPath);
   console.log("Done:", new Date().toISOString());
 }
 
