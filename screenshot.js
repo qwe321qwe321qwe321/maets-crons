@@ -42,11 +42,12 @@ async function takeScreenshot(proxy, slug, cc) {
     ...(proxy ? { proxy } : {}),
   });
 
-  // verify outbound IP / country before screenshotting
+  // verify outbound IP + city before screenshotting
   const checkPage = await context.newPage();
-  const ipRes = await checkPage.goto("https://api.ipify.org", { timeout: 15000 });
-  const ip = await ipRes.text();
-  console.log(`[${slug}] outbound ip: ${ip.trim()}`);
+  const ipRes = await checkPage.goto("https://ipinfo.io/json", { timeout: 15000 });
+  const ipData = await ipRes.json();
+  const ipLabel = `${ipData.ip} (${ipData.city}, ${ipData.country})`;
+  console.log(`[${slug}] ${ipLabel}`);
   await checkPage.close();
 
   const page = await context.newPage();
@@ -134,7 +135,7 @@ async function takeScreenshot(proxy, slug, cc) {
   await page.screenshot({ path: screenshotPath, fullPage: true });
   await browser.close();
 
-  return { screenshotPath, tabData };
+  return { screenshotPath, tabData, ipLabel };
 }
 
 async function postToChannel(channelId, botToken, screenshotPath, tabData, label, unixTs, isoDate, showButton) {
@@ -223,16 +224,16 @@ async function run() {
   const isoDate = new Date().toISOString();
 
   console.log("Taking default screenshot...");
-  const { screenshotPath: defaultPath, tabData: defaultTabs } = await takeScreenshot(null, "default", null);
+  const { screenshotPath: defaultPath, tabData: defaultTabs, ipLabel: defaultIp } = await takeScreenshot(null, "default", null);
 
   console.log("Fetching JP proxy...");
   const jpProxy = await fetchJapanProxy();
   console.log("Taking JP screenshot...");
-  const { screenshotPath: jpPath, tabData: jpTabs } = await takeScreenshot(jpProxy, "japan", "jp");
+  const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp");
 
   for (const channelId of channelIds) {
-    await postToChannel(channelId, botToken, defaultPath, defaultTabs, "🌐 Steam homepage · Default", unixTs, isoDate, false);
-    await postToChannel(channelId, botToken, jpPath, jpTabs, "🇯🇵 Steam homepage · Japan", unixTs, isoDate, true);
+    await postToChannel(channelId, botToken, defaultPath, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, jpPath, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, true);
   }
 
   fs.unlinkSync(defaultPath);
