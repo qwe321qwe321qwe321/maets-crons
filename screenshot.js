@@ -43,9 +43,9 @@ async function takeScreenshot(proxy, slug, cc) {
 
   // verify outbound IP / country before screenshotting
   const checkPage = await context.newPage();
-  const ipRes = await checkPage.goto("https://ipapi.co/json/", { timeout: 15000 });
-  const ipData = await ipRes.json();
-  console.log(`[${slug}] ip: ${ipData.ip}, country: ${ipData.country_code}`);
+  const ipRes = await checkPage.goto("https://api.ipify.org", { timeout: 15000 });
+  const ip = await ipRes.text();
+  console.log(`[${slug}] outbound ip: ${ip.trim()}`);
   await checkPage.close();
 
   const page = await context.newPage();
