@@ -9,6 +9,11 @@ on:
         description: "Comma-separated Discord channel IDs (leave empty to query D1)"
         required: false
         type: string
+      cn_only:
+        description: "Only capture CN screenshot (for retry)"
+        required: false
+        type: boolean
+        default: false
 jobs:
   screenshot:
     runs-on: ubuntu-latest
@@ -38,4 +43,5 @@ jobs:
           CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
           CHANNEL_IDS: ${{ inputs.channel_ids }}
           WEBSHARE_API_KEY: ${{ secrets.WEBSHARE_API_KEY }}
+          CN_ONLY: ${{ inputs.cn_only }}
 

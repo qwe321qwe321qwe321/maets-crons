@@ -206,6 +206,11 @@ const CAPTURE_NOW_BUTTON = {
   components: [{ type: 2, style: 1, custom_id: "capture_now", emoji: { name: "📸" }, label: "Capture Now" }],
 };
 
+const RETRY_CN_BUTTON = {
+  type: 1,
+  components: [{ type: 2, style: 4, custom_id: "retry_cn", emoji: { name: "🔁" }, label: "再試一次" }],
+};
+
 async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton) {
   const tabLabels = [
     { key: "popularNewReleases", label: "Popular New Releases" },
@@ -272,6 +277,48 @@ async function run() {
   const unixTs = Math.floor(Date.now() / 1000);
   const isoDate = new Date().toISOString();
 
+  if (process.env.CN_ONLY === "true") {
+    console.log("CN-only mode: retrying CN screenshot...");
+    let cnResult = null;
+    let cnError = null;
+    try {
+      const cnProxies = await findWorkingFreeProxy("CN");
+      for (const proxy of cnProxies) {
+        console.log(`Trying ${proxy.server} for CN screenshot...`);
+        try {
+          cnResult = await takeScreenshot(proxy, "cn", "cn", "zh-CN", proxy.ipLabel, unixTs, { waitUntil: "domcontentloaded", waitForContent: true, timeout: 90000 });
+          break;
+        } catch (e) {
+          console.log(`CN screenshot failed with ${proxy.server}: ${e.message}`);
+        }
+      }
+      if (!cnResult) cnError = new Error("All verified CN proxies failed to load Steam");
+    } catch (e) {
+      cnError = e;
+    }
+    for (const channelId of channelIds) {
+      if (cnResult) {
+        await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData,
+          `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true);
+      } else {
+        await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+          method: "POST",
+          headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            content: `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
+            components: [RETRY_CN_BUTTON],
+          }),
+        });
+      }
+    }
+    if (cnResult) {
+      fs.unlinkSync(cnResult.screenshotPath);
+      fs.unlinkSync(cnResult.htmlPath);
+    }
+    console.log("Done:", new Date().toISOString());
+    return;
+  }
+
   console.log("Taking all screenshots in parallel...");
   const [defaultResult, gbResult, jpResult, cnOutcome] = await Promise.all([
     takeScreenshot(null, "default", null, "en-US", null, unixTs),
@@ -308,7 +355,7 @@ async function run() {
         headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           content: `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
-          components: [CAPTURE_NOW_BUTTON],
+          components: [RETRY_CN_BUTTON],
         }),
       });
     }
