@@ -2,7 +2,7 @@ name: Steam Homepage Screenshot
 
 on:
   schedule:
-    - cron: "0 1,13 * * *"
+    - cron: "0 1,13,18 * * *"
   workflow_dispatch:
     inputs:
       channel_ids:
