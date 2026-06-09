@@ -344,7 +344,7 @@ async function run() {
   console.log("Done:", new Date().toISOString());
 }
 
-run().catch((err) => {
+run().then(() => process.exit(0)).catch((err) => {
   console.error(err);
   process.exit(1);
 });
