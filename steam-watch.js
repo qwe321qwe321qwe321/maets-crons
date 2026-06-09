@@ -52,7 +52,7 @@ function generateSessionId() {
 	return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function fetchSteamFollowers(appid, retries = 1) {
+async function fetchSteamFollowers(appid, retries = 2) {
 	const sessionid = generateSessionId();
 	const res = await fetch(
 		`https://steamcommunity.com/search/SearchCommunityAjax?text=${appid}&filter=groups&sessionid=${sessionid}&steamid_user=false`,
@@ -69,8 +69,8 @@ async function fetchSteamFollowers(appid, retries = 1) {
 			console.error(`[followers][${appid}] 429, no retries left`);
 			return null;
 		}
-		console.warn(`[followers][${appid}] 429, waiting 5s before retry`);
-		await new Promise(r => setTimeout(r, 5000));
+		console.warn(`[followers][${appid}] 429, waiting 15s before retry (${retries} left)`);
+		await new Promise(r => setTimeout(r, 15000));
 		return fetchSteamFollowers(appid, retries - 1);
 	}
 	if (!res.ok) {
@@ -222,7 +222,7 @@ async function runDailyReport(filterChannelId = '') {
 	let firstFollower = true;
 	for (const { appid, comingSoon } of baseData) {
 		if (comingSoon) {
-			if (!firstFollower) await new Promise(r => setTimeout(r, 1000));
+			if (!firstFollower) await new Promise(r => setTimeout(r, 3000));
 			firstFollower = false;
 			followerMap.set(appid, await fetchSteamFollowers(appid));
 		} else {
