@@ -10,7 +10,7 @@ on:
         required: false
         type: string
       free_proxy_mode:
-        description: "Use freeproxy.world to capture an extra region screenshot"
+        description: "[TEST] Skip normal run, capture only via freeproxy.world"
         required: false
         type: boolean
         default: false

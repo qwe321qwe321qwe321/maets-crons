@@ -282,6 +282,27 @@ async function run() {
   const unixTs = Math.floor(Date.now() / 1000);
   const isoDate = new Date().toISOString();
 
+  const freeProxyMode = process.env.FREE_PROXY_MODE === "true";
+  const freeProxyCountry = (process.env.FREE_PROXY_COUNTRY || "CN").toUpperCase();
+
+  if (freeProxyMode) {
+    console.log(`Fetching free ${freeProxyCountry} proxy from freeproxy.world...`);
+    const cnProxy = await findWorkingFreeProxy(freeProxyCountry);
+    const slug = freeProxyCountry.toLowerCase();
+    console.log(`Taking ${freeProxyCountry} screenshot...`);
+    const result = await takeScreenshot(cnProxy, slug, freeProxyCountry.toLowerCase(), "en-US", cnProxy.ipLabel, unixTs);
+    const cc = freeProxyCountry;
+    const flag = cc.split("").map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
+    for (const channelId of channelIds) {
+      await postToChannel(channelId, botToken, result.screenshotPath, result.htmlPath, result.tabData,
+        `${flag} Steam homepage · ${cc} (freeproxy.world) · \`${result.ipLabel}\``, unixTs, isoDate, true);
+    }
+    fs.unlinkSync(result.screenshotPath);
+    fs.unlinkSync(result.htmlPath);
+    console.log("Done:", new Date().toISOString());
+    return;
+  }
+
   console.log("Taking default screenshot...");
   const { screenshotPath: defaultPath, htmlPath: defaultHtml, tabData: defaultTabs, ipLabel: defaultIp } = await takeScreenshot(null, "default", null, "en-US", null, unixTs);
 
@@ -295,28 +316,10 @@ async function run() {
   console.log("Taking JP screenshot...");
   const { screenshotPath: jpPath, htmlPath: jpHtml, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP", jpProxy.ipLabel, unixTs);
 
-  let freeProxyResult = null;
-  const freeProxyMode = process.env.FREE_PROXY_MODE === "true";
-  const freeProxyCountry = (process.env.FREE_PROXY_COUNTRY || "CN").toUpperCase();
-  if (freeProxyMode) {
-    console.log(`Fetching free ${freeProxyCountry} proxy from freeproxy.world...`);
-    const cnProxy = await findWorkingFreeProxy(freeProxyCountry);
-    const slug = freeProxyCountry.toLowerCase();
-    console.log(`Taking ${freeProxyCountry} screenshot...`);
-    const result = await takeScreenshot(cnProxy, slug, freeProxyCountry.toLowerCase(), "en-US", cnProxy.ipLabel, unixTs);
-    freeProxyResult = { ...result, country: freeProxyCountry };
-  }
-
   for (const channelId of channelIds) {
     await postToChannel(channelId, botToken, defaultPath, defaultHtml, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
     await postToChannel(channelId, botToken, gbPath, gbHtml, gbTabs, `🇬🇧 Steam homepage · UK · \`${gbIp}\``, unixTs, isoDate, false);
-    await postToChannel(channelId, botToken, jpPath, jpHtml, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, !freeProxyMode);
-    if (freeProxyResult) {
-      const cc = freeProxyResult.country;
-      const flag = cc.split("").map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
-      await postToChannel(channelId, botToken, freeProxyResult.screenshotPath, freeProxyResult.htmlPath, freeProxyResult.tabData,
-        `${flag} Steam homepage · ${cc} (freeproxy.world) · \`${freeProxyResult.ipLabel}\``, unixTs, isoDate, true);
-    }
+    await postToChannel(channelId, botToken, jpPath, jpHtml, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, true);
   }
 
   fs.unlinkSync(defaultPath);
@@ -325,10 +328,6 @@ async function run() {
   fs.unlinkSync(gbHtml);
   fs.unlinkSync(jpPath);
   fs.unlinkSync(jpHtml);
-  if (freeProxyResult) {
-    fs.unlinkSync(freeProxyResult.screenshotPath);
-    fs.unlinkSync(freeProxyResult.htmlPath);
-  }
   console.log("Done:", new Date().toISOString());
 }
 
