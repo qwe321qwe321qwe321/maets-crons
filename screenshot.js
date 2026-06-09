@@ -114,6 +114,10 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
     timeout: pageLoadOptions.timeout ?? 30000,
   });
 
+  if (pageLoadOptions.waitForContent) {
+    await page.waitForSelector("[data-ds-appid]", { timeout: pageLoadOptions.timeout ?? 30000 }).catch(() => {});
+  }
+
   const cookieBtn = page.locator("#acceptAllButton");
   if (await cookieBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
     await cookieBtn.click();
@@ -299,7 +303,7 @@ async function run() {
       console.log(`Trying ${proxy.server} for Steam screenshot...`);
       try {
         const freeLocale = freeProxyCountry === "CN" ? "zh-CN" : freeProxyCountry === "TW" ? "zh-TW" : "en-US";
-        result = await takeScreenshot(proxy, slug, freeProxyCountry.toLowerCase(), freeLocale, proxy.ipLabel, unixTs, { waitUntil: "load", timeout: 90000 });
+        result = await takeScreenshot(proxy, slug, freeProxyCountry.toLowerCase(), freeLocale, proxy.ipLabel, unixTs, { waitUntil: "domcontentloaded", waitForContent: true, timeout: 90000 });
         break;
       } catch (e) {
         console.log(`Screenshot failed with ${proxy.server}: ${e.message}`);
