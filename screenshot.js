@@ -32,7 +32,7 @@ async function fetchProxyByCountry(countryCode) {
   return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password, ipLabel };
 }
 
-async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null) {
+async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null, unixTs) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -140,12 +140,17 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
 
   const screenshotPath = path.join(__dirname, `steam_homepage_${slug}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
+
+  const htmlContent = await page.content();
+  const htmlPath = path.join(__dirname, `${unixTs}_${slug}.html`);
+  fs.writeFileSync(htmlPath, htmlContent, "utf8");
+
   await browser.close();
 
-  return { screenshotPath, tabData, ipLabel };
+  return { screenshotPath, htmlPath, tabData, ipLabel };
 }
 
-async function postToChannel(channelId, botToken, screenshotPath, tabData, label, unixTs, isoDate, showButton) {
+async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton) {
   const tabLabels = [
     { key: "popularNewReleases", label: "Popular New Releases" },
     { key: "topSellers", label: "Top Sellers" },
@@ -180,8 +185,11 @@ async function postToChannel(channelId, botToken, screenshotPath, tabData, label
   };
 
   const imageBuffer = fs.readFileSync(screenshotPath);
+  const htmlBuffer = fs.readFileSync(htmlPath);
+  const htmlFilename = path.basename(htmlPath);
   const formData = new FormData();
-  formData.append("file", new Blob([imageBuffer], { type: "image/png" }), "steam_homepage.png");
+  formData.append("files[0]", new Blob([imageBuffer], { type: "image/png" }), "steam_homepage.png");
+  formData.append("files[1]", new Blob([htmlBuffer], { type: "text/html" }), htmlFilename);
   formData.append(
     "payload_json",
     JSON.stringify({ content: `${label} · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 })
@@ -231,28 +239,30 @@ async function run() {
   const isoDate = new Date().toISOString();
 
   console.log("Taking default screenshot...");
-  const { screenshotPath: defaultPath, tabData: defaultTabs, ipLabel: defaultIp } = await takeScreenshot(null, "default", null);
+  const { screenshotPath: defaultPath, htmlPath: defaultHtml, tabData: defaultTabs, ipLabel: defaultIp } = await takeScreenshot(null, "default", null, "en-US", null, unixTs);
 
   console.log("Fetching GB proxy...");
   const gbProxy = await fetchProxyByCountry("GB");
   console.log("Taking GB screenshot...");
-  const { screenshotPath: gbPath, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb", "en-GB", gbProxy.ipLabel);
+  const { screenshotPath: gbPath, htmlPath: gbHtml, tabData: gbTabs, ipLabel: gbIp } = await takeScreenshot(gbProxy, "gb", "gb", "en-GB", gbProxy.ipLabel, unixTs);
 
   console.log("Fetching JP proxy...");
   const jpProxy = await fetchProxyByCountry("JP");
   console.log("Taking JP screenshot...");
-  const { screenshotPath: jpPath, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP", jpProxy.ipLabel);
+  const { screenshotPath: jpPath, htmlPath: jpHtml, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP", jpProxy.ipLabel, unixTs);
 
   for (const channelId of channelIds) {
-    await postToChannel(channelId, botToken, defaultPath, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
-    await postToChannel(channelId, botToken, gbPath, gbTabs, `🇬🇧 Steam homepage · UK · \`${gbIp}\``, unixTs, isoDate, false);
-    await postToChannel(channelId, botToken, jpPath, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, true);
+    await postToChannel(channelId, botToken, defaultPath, defaultHtml, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, gbPath, gbHtml, gbTabs, `🇬🇧 Steam homepage · UK · \`${gbIp}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, jpPath, jpHtml, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, true);
   }
 
-  fs.unlinkSync(gbPath);
-
   fs.unlinkSync(defaultPath);
+  fs.unlinkSync(defaultHtml);
+  fs.unlinkSync(gbPath);
+  fs.unlinkSync(gbHtml);
   fs.unlinkSync(jpPath);
+  fs.unlinkSync(jpHtml);
   console.log("Done:", new Date().toISOString());
 }
 
