@@ -20,18 +20,36 @@ async function d1(sql, params = []) {
 
 async function fetchFreeProxyWorldList(countryCode) {
   const candidates = [];
-  for (const type of ["socks5", "socks4"]) {
-    const url = `https://www.freeproxy.world/?type=${type}&country=${countryCode.toLowerCase()}`;
-    const res = await fetch(url, {
-      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
-    });
-    if (!res.ok) { console.warn(`freeproxy.world fetch failed (${type}): ${res.status}`); continue; }
-    const html = await res.text();
-    const rows = [...html.matchAll(/<td[^>]*>\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*<\/td>\s*<td[^>]*>\s*(\d+)\s*<\/td>/g)];
-    for (const [, ip, port] of rows) {
-      candidates.push({ server: `${type}://${ip}:${port}` });
+  const browser = await chromium.launch();
+  try {
+    const context = await browser.newContext();
+    for (const type of ["socks5", "socks4"]) {
+      const url = `https://www.freeproxy.world/?type=${type}&country=${countryCode.toLowerCase()}`;
+      const page = await context.newPage();
+      try {
+        await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20000 });
+        const rows = await page.$$eval("table tbody tr", (trs) =>
+          trs.flatMap((tr) => {
+            const tds = tr.querySelectorAll("td");
+            const ip = tds[0]?.textContent?.trim();
+            const port = tds[1]?.textContent?.trim();
+            return ip && port && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && /^\d+$/.test(port)
+              ? [{ ip, port }]
+              : [];
+          })
+        );
+        for (const { ip, port } of rows) {
+          candidates.push({ server: `${type}://${ip}:${port}` });
+        }
+        console.log(`freeproxy.world ${type}/${countryCode}: found ${rows.length} candidates`);
+      } catch (e) {
+        console.warn(`freeproxy.world scrape failed (${type}): ${e.message}`);
+      } finally {
+        await page.close();
+      }
     }
-    console.log(`freeproxy.world ${type}/${countryCode}: found ${rows.length} candidates`);
+  } finally {
+    await browser.close();
   }
   return candidates;
 }
