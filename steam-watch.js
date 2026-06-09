@@ -365,7 +365,7 @@ async function runDailyReport(filterChannelId = '') {
 		for (const block of blocks) {
 			const candidate = `${current}\n\n${block}`;
 			if (candidate.length > 1900) {
-				messages.push(current);
+				messages.push(current + '\n');
 				current = block;
 			} else {
 				current = candidate;
