@@ -37,6 +37,7 @@ async function fetchProxyScrapeList(countryCode) {
 async function findWorkingFreeProxy(countryCode) {
   const candidates = await fetchProxyScrapeList(countryCode);
   if (candidates.length === 0) throw new Error(`No free proxies found for ${countryCode}`);
+  const verified = [];
   console.log(`Testing up to ${Math.min(candidates.length, 20)} proxies for ${countryCode}...`);
   for (const candidate of candidates.slice(0, 20)) {
     const browser = await chromium.launch();
@@ -48,16 +49,19 @@ async function findWorkingFreeProxy(countryCode) {
       await browser.close();
       if (data?.country === countryCode) {
         const ipLabel = `${data.ip}${data.city ? ` (${data.city}, ${data.country})` : ""}`;
-        console.log(`Working proxy: ${candidate.server} → ${ipLabel}`);
-        return { server: candidate.server, ipLabel };
+        console.log(`Verified proxy: ${candidate.server} → ${ipLabel}`);
+        verified.push({ server: candidate.server, ipLabel });
+        if (verified.length >= 3) break;
+      } else {
+        console.log(`Proxy ${candidate.server}: country=${data?.country ?? "?"}, skipping`);
       }
-      console.log(`Proxy ${candidate.server}: country=${data?.country ?? "?"}, skipping`);
     } catch (e) {
       console.log(`Proxy ${candidate.server} failed: ${e.message}`);
       await browser.close().catch(() => {});
     }
   }
-  throw new Error(`No working ${countryCode} proxy found after trying up to 20 candidates`);
+  if (verified.length === 0) throw new Error(`No working ${countryCode} proxy found after trying up to 20 candidates`);
+  return verified;
 }
 
 async function fetchProxyByCountry(countryCode) {
@@ -284,16 +288,25 @@ async function run() {
   const freeProxyCountry = (process.env.FREE_PROXY_COUNTRY || "CN").toUpperCase();
 
   if (freeProxyMode) {
-    console.log(`Fetching free ${freeProxyCountry} proxy from freeproxy.world...`);
-    const cnProxy = await findWorkingFreeProxy(freeProxyCountry);
+    console.log(`Fetching free ${freeProxyCountry} proxies from proxyscrape...`);
+    const verifiedProxies = await findWorkingFreeProxy(freeProxyCountry);
     const slug = freeProxyCountry.toLowerCase();
-    console.log(`Taking ${freeProxyCountry} screenshot...`);
-    const result = await takeScreenshot(cnProxy, slug, freeProxyCountry.toLowerCase(), "en-US", cnProxy.ipLabel, unixTs, { waitUntil: "load", timeout: 90000 });
     const cc = freeProxyCountry;
     const flag = cc.split("").map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
+    let result = null;
+    for (const proxy of verifiedProxies) {
+      console.log(`Trying ${proxy.server} for Steam screenshot...`);
+      try {
+        result = await takeScreenshot(proxy, slug, freeProxyCountry.toLowerCase(), "en-US", proxy.ipLabel, unixTs, { waitUntil: "load", timeout: 90000 });
+        break;
+      } catch (e) {
+        console.log(`Screenshot failed with ${proxy.server}: ${e.message}`);
+      }
+    }
+    if (!result) throw new Error(`All verified ${cc} proxies failed to load Steam`);
     for (const channelId of channelIds) {
       await postToChannel(channelId, botToken, result.screenshotPath, result.htmlPath, result.tabData,
-        `${flag} Steam homepage · ${cc} (freeproxy.world) · \`${result.ipLabel}\``, unixTs, isoDate, true);
+        `${flag} Steam homepage · ${cc} (proxyscrape) · \`${result.ipLabel}\``, unixTs, isoDate, true);
     }
     fs.unlinkSync(result.screenshotPath);
     fs.unlinkSync(result.htmlPath);
