@@ -201,51 +201,36 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
   return { screenshotPath, htmlPath, tabData, ipLabel };
 }
 
-const TAB_KEYS = [
-  { key: "popularNewReleases", label: "Popular New Releases" },
-  { key: "topSellers", label: "Top Sellers" },
-  { key: "popularUpcoming", label: "Popular Upcoming" },
-  { key: "specials", label: "Specials" },
-  { key: "trendingFree", label: "Trending Free" },
-];
-
 const CAPTURE_NOW_BUTTON = {
   type: 1,
   components: [{ type: 2, style: 1, custom_id: "capture_now", emoji: { name: "📸" }, label: "Capture Now" }],
 };
 
-function buildTabBlock(label, tabData) {
-  const lines = [label];
-  for (const { key, label: tabLabel } of TAB_KEYS) {
-    lines.push(`  ${tabLabel}`);
+async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton) {
+  const tabLabels = [
+    { key: "popularNewReleases", label: "Popular New Releases" },
+    { key: "topSellers", label: "Top Sellers" },
+    { key: "popularUpcoming", label: "Popular Upcoming" },
+    { key: "specials", label: "Specials" },
+    { key: "trendingFree", label: "Trending Free" },
+  ];
+  const lines = [];
+  for (const { key, label: tabLabel } of tabLabels) {
+    lines.push(tabLabel);
     const items = tabData[key];
     if (items.length === 0) {
-      lines.push("    (no data)");
+      lines.push("  (no data)");
     } else {
-      items.forEach((item, i) => lines.push(`    ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})`));
+      items.forEach((item, i) => lines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})`));
     }
+    lines.push("");
   }
-  return lines.join("\n");
-}
+  const codeBlock = "```\n" + lines.join("\n").trimEnd() + "\n```";
 
-async function postAllToChannel(channelId, botToken, regions, unixTs, isoDate) {
-  // regions: [{ label, screenshotPath, htmlPath, tabData }] or [{ label, error }] for failed ones
   const formData = new FormData();
-  let fileIdx = 0;
-  const labelLines = [];
-
-  for (const r of regions) {
-    labelLines.push(r.error ? `${r.label} ⚠️ 截圖失敗` : r.label);
-    if (!r.error) {
-      formData.append(`files[${fileIdx++}]`, new Blob([fs.readFileSync(r.screenshotPath)], { type: "image/png" }), `${r.slug}.png`);
-      formData.append(`files[${fileIdx++}]`, new Blob([fs.readFileSync(r.htmlPath)], { type: "text/html" }), path.basename(r.htmlPath));
-    }
-  }
-
-  formData.append("payload_json", JSON.stringify({
-    content: `${labelLines.join(" · ")}\n${isoDate} · <t:${unixTs}:F>`,
-    flags: 4,
-  }));
+  formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/png" }), "steam_homepage.png");
+  formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
+  formData.append("payload_json", JSON.stringify({ content: `${label} · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 }));
 
   const imgRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: "POST",
@@ -253,19 +238,14 @@ async function postAllToChannel(channelId, botToken, regions, unixTs, isoDate) {
     body: formData,
   });
   if (!imgRes.ok) {
-    console.error(`Screenshot post failed for ${channelId}: ${imgRes.status} ${await imgRes.text()}`);
+    console.error(`Image post failed for ${channelId}: ${imgRes.status} ${await imgRes.text()}`);
     return;
   }
-
-  const allTabLines = regions.map((r) =>
-    r.error ? `${r.label}\n  ⚠️ 截圖失敗: ${r.error.message}` : buildTabBlock(r.label, r.tabData)
-  );
-  const codeBlock = "```\n" + allTabLines.join("\n\n") + "\n```";
 
   const tabRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: "POST",
     headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ content: codeBlock, flags: 4, components: [CAPTURE_NOW_BUTTON] }),
+    body: JSON.stringify({ content: codeBlock, flags: 4, ...(showButton ? { components: [CAPTURE_NOW_BUTTON] } : {}) }),
   });
   if (!tabRes.ok) {
     console.error(`Tab post failed for ${channelId}: ${tabRes.status} ${await tabRes.text()}`);
@@ -316,24 +296,33 @@ async function run() {
   const cnError = cnOutcome?.error ?? null;
   if (cnError) console.error(`CN failed: ${cnError.message}`);
 
-  const regions = [
-    { slug: "default", label: `🌐 Default · \`${defaultResult.ipLabel}\``, ...defaultResult },
-    { slug: "gb",      label: `🇬🇧 UK · \`${gbResult.ipLabel}\``,         ...gbResult },
-    { slug: "japan",   label: `🇯🇵 Japan · \`${jpResult.ipLabel}\``,      ...jpResult },
-    cnResult
-      ? { slug: "cn", label: `🇨🇳 CN · \`${cnResult.ipLabel}\``, ...cnResult }
-      : { slug: "cn", label: "🇨🇳 CN", error: cnError },
-  ];
-
   for (const channelId of channelIds) {
-    await postAllToChannel(channelId, botToken, regions, unixTs, isoDate);
+    await postToChannel(channelId, botToken, defaultResult.screenshotPath, defaultResult.htmlPath, defaultResult.tabData, `🌐 Steam homepage · Default · \`${defaultResult.ipLabel}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, gbResult.screenshotPath, gbResult.htmlPath, gbResult.tabData, `🇬🇧 Steam homepage · UK · \`${gbResult.ipLabel}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, jpResult.screenshotPath, jpResult.htmlPath, jpResult.tabData, `🇯🇵 Steam homepage · Japan · \`${jpResult.ipLabel}\``, unixTs, isoDate, !cnResult);
+    if (cnResult) {
+      await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData, `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true);
+    } else {
+      await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+        method: "POST",
+        headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
+          components: [CAPTURE_NOW_BUTTON],
+        }),
+      });
+    }
   }
 
-  for (const r of regions) {
-    if (!r.error) {
-      fs.unlinkSync(r.screenshotPath);
-      fs.unlinkSync(r.htmlPath);
-    }
+  fs.unlinkSync(defaultResult.screenshotPath);
+  fs.unlinkSync(defaultResult.htmlPath);
+  fs.unlinkSync(gbResult.screenshotPath);
+  fs.unlinkSync(gbResult.htmlPath);
+  fs.unlinkSync(jpResult.screenshotPath);
+  fs.unlinkSync(jpResult.htmlPath);
+  if (cnResult) {
+    fs.unlinkSync(cnResult.screenshotPath);
+    fs.unlinkSync(cnResult.htmlPath);
   }
   console.log("Done:", new Date().toISOString());
 }
