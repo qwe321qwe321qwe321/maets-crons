@@ -27,3 +27,4 @@ jobs:
           CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
           DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
           FILTER_CHANNEL_ID: ${{ inputs.channel_id }}
+          WEBSHARE_API_KEY: ${{ secrets.WEBSHARE_API_KEY }}

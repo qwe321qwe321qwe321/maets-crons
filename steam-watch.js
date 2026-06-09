@@ -2,6 +2,31 @@ const CF_API_TOKEN = process.env.CF_API_TOKEN;
 const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
 const CF_D1_DATABASE_ID = process.env.CF_D1_DATABASE_ID;
 const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+const WEBSHARE_API_KEY = process.env.WEBSHARE_API_KEY;
+
+const { ProxyAgent, fetch: proxyFetch } = require('undici');
+
+let webshareProxies = null;
+
+async function loadWebshareProxies() {
+	if (webshareProxies !== null) return webshareProxies;
+	if (!WEBSHARE_API_KEY) { webshareProxies = []; return []; }
+	try {
+		const res = await fetch('https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page=1&page_size=25', {
+			headers: { 'Authorization': `Token ${WEBSHARE_API_KEY}` },
+		});
+		if (!res.ok) { webshareProxies = []; return []; }
+		const json = await res.json();
+		webshareProxies = (json.results ?? []).map(p =>
+			`http://${p.username}:${p.password}@${p.proxy_address}:${p.port}`
+		);
+		console.log(`[webshare] loaded ${webshareProxies.length} proxies`);
+	} catch (e) {
+		console.error(`[webshare] failed to load proxies: ${e}`);
+		webshareProxies = [];
+	}
+	return webshareProxies;
+}
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${CF_D1_DATABASE_ID}/query`;
 
@@ -52,27 +77,45 @@ function generateSessionId() {
 	return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-const FOLLOWER_RETRY_DELAYS = [15000, 30000, 60000];
+const FOLLOWER_BACKOFF_DELAYS = [15000, 30000, 60000];
 
 async function fetchSteamFollowers(appid, attempt = 0) {
 	const sessionid = generateSessionId();
-	const res = await fetch(
-		`https://steamcommunity.com/search/SearchCommunityAjax?text=${appid}&filter=groups&sessionid=${sessionid}&steamid_user=false`,
-		{
-			headers: {
-				'Cookie': `sessionid=${sessionid}`,
-				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-				'Referer': 'https://steamcommunity.com/search/groups',
-			},
-		}
-	);
+	const url = `https://steamcommunity.com/search/SearchCommunityAjax?text=${appid}&filter=groups&sessionid=${sessionid}&steamid_user=false`;
+	const headers = {
+		'Cookie': `sessionid=${sessionid}`,
+		'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+		'Referer': 'https://steamcommunity.com/search/groups',
+	};
+
+	const proxies = await loadWebshareProxies();
+	let res;
+	if (attempt > 0 && proxies.length > 0) {
+		const proxyUrl = proxies[(attempt - 1) % proxies.length];
+		console.log(`[followers][${appid}] attempt ${attempt} via proxy ${proxyUrl.split('@')[1]}`);
+		res = await proxyFetch(url, { headers, dispatcher: new ProxyAgent(proxyUrl) });
+	} else {
+		res = await fetch(url, { headers });
+	}
+
 	if (res.status === 429) {
-		const delay = FOLLOWER_RETRY_DELAYS[attempt];
+		if (proxies.length > 0) {
+			// rotate to next proxy immediately, no wait needed
+			const nextProxy = attempt < proxies.length
+				? proxies[attempt % proxies.length]
+				: null;
+			if (nextProxy) {
+				console.warn(`[followers][${appid}] 429, rotating proxy (attempt ${attempt + 1})`);
+				return fetchSteamFollowers(appid, attempt + 1);
+			}
+		}
+		// no proxy available (or exhausted) — progressive backoff
+		const delay = FOLLOWER_BACKOFF_DELAYS[attempt - proxies.length] ?? null;
 		if (delay == null) {
-			console.error(`[followers][${appid}] 429, giving up after ${attempt} retries`);
+			console.error(`[followers][${appid}] 429, giving up`);
 			return null;
 		}
-		console.warn(`[followers][${appid}] 429, waiting ${delay / 1000}s before retry (attempt ${attempt + 1}/${FOLLOWER_RETRY_DELAYS.length})`);
+		console.warn(`[followers][${appid}] 429, waiting ${delay / 1000}s (attempt ${attempt + 1})`);
 		await new Promise(r => setTimeout(r, delay));
 		return fetchSteamFollowers(appid, attempt + 1);
 	}
