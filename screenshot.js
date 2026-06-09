@@ -74,7 +74,7 @@ async function fetchProxyByCountry(countryCode) {
   return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password, ipLabel };
 }
 
-async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null, unixTs) {
+async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null, unixTs, pageLoadOptions = {}) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -105,8 +105,8 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
   const url = `https://store.steampowered.com/${query ? `?${query}` : ""}`;
 
   await page.goto(url, {
-    waitUntil: "networkidle",
-    timeout: 30000,
+    waitUntil: pageLoadOptions.waitUntil ?? "networkidle",
+    timeout: pageLoadOptions.timeout ?? 30000,
   });
 
   const cookieBtn = page.locator("#acceptAllButton");
@@ -288,7 +288,7 @@ async function run() {
     const cnProxy = await findWorkingFreeProxy(freeProxyCountry);
     const slug = freeProxyCountry.toLowerCase();
     console.log(`Taking ${freeProxyCountry} screenshot...`);
-    const result = await takeScreenshot(cnProxy, slug, freeProxyCountry.toLowerCase(), "en-US", cnProxy.ipLabel, unixTs);
+    const result = await takeScreenshot(cnProxy, slug, freeProxyCountry.toLowerCase(), "en-US", cnProxy.ipLabel, unixTs, { waitUntil: "load", timeout: 90000 });
     const cc = freeProxyCountry;
     const flag = cc.split("").map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
     for (const channelId of channelIds) {
