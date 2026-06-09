@@ -27,11 +27,12 @@ async function fetchFreeProxyWorldList(countryCode) {
       const url = `https://www.freeproxy.world/?type=${type}&country=${countryCode.toLowerCase()}`;
       const page = await context.newPage();
       try {
-        await page.goto(url, { waitUntil: "networkidle", timeout: 30000 });
+        await page.goto(url, { waitUntil: "load", timeout: 30000 });
+        await page.waitForSelector("table", { timeout: 10000 }).catch(() => {});
         const debug = await page.evaluate(() => ({
           title: document.title,
           allTrs: document.querySelectorAll("tr").length,
-          bodySnippet: document.body?.innerHTML?.slice(0, 500),
+          bodySnippet: document.body?.innerHTML?.slice(0, 800),
         }));
         console.log(`freeproxy.world ${type}/${countryCode} debug:`, JSON.stringify(debug));
         const rows = await page.$$eval("table tbody tr", (trs) =>
