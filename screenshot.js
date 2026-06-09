@@ -18,6 +18,50 @@ async function d1(sql, params = []) {
   return json.result[0].results;
 }
 
+async function fetchFreeProxyWorldList(countryCode) {
+  const candidates = [];
+  for (const type of ["socks5", "socks4"]) {
+    const url = `https://www.freeproxy.world/?type=${type}&country=${countryCode.toLowerCase()}`;
+    const res = await fetch(url, {
+      headers: { "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36" },
+    });
+    if (!res.ok) { console.warn(`freeproxy.world fetch failed (${type}): ${res.status}`); continue; }
+    const html = await res.text();
+    const rows = [...html.matchAll(/<td[^>]*>\s*(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\s*<\/td>\s*<td[^>]*>\s*(\d+)\s*<\/td>/g)];
+    for (const [, ip, port] of rows) {
+      candidates.push({ server: `${type}://${ip}:${port}` });
+    }
+    console.log(`freeproxy.world ${type}/${countryCode}: found ${rows.length} candidates`);
+  }
+  return candidates;
+}
+
+async function findWorkingFreeProxy(countryCode) {
+  const candidates = await fetchFreeProxyWorldList(countryCode);
+  if (candidates.length === 0) throw new Error(`No free proxies found for ${countryCode}`);
+  console.log(`Testing up to ${Math.min(candidates.length, 20)} proxies for ${countryCode}...`);
+  for (const candidate of candidates.slice(0, 20)) {
+    const browser = await chromium.launch();
+    try {
+      const ctx = await browser.newContext({ proxy: { server: candidate.server } });
+      const page = await ctx.newPage();
+      const res = await page.goto("https://ipinfo.io/json", { timeout: 15000 });
+      const data = await res.json().catch(() => null);
+      await browser.close();
+      if (data?.country === countryCode) {
+        const ipLabel = `${data.ip}${data.city ? ` (${data.city}, ${data.country})` : ""}`;
+        console.log(`Working proxy: ${candidate.server} → ${ipLabel}`);
+        return { server: candidate.server, ipLabel };
+      }
+      console.log(`Proxy ${candidate.server}: country=${data?.country ?? "?"}, skipping`);
+    } catch (e) {
+      console.log(`Proxy ${candidate.server} failed: ${e.message}`);
+      await browser.close().catch(() => {});
+    }
+  }
+  throw new Error(`No working ${countryCode} proxy found after trying up to 20 candidates`);
+}
+
 async function fetchProxyByCountry(countryCode) {
   const res = await fetch(
     "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=100",
@@ -251,10 +295,28 @@ async function run() {
   console.log("Taking JP screenshot...");
   const { screenshotPath: jpPath, htmlPath: jpHtml, tabData: jpTabs, ipLabel: jpIp } = await takeScreenshot(jpProxy, "japan", "jp", "ja-JP", jpProxy.ipLabel, unixTs);
 
+  let freeProxyResult = null;
+  const freeProxyMode = process.env.FREE_PROXY_MODE === "true";
+  const freeProxyCountry = (process.env.FREE_PROXY_COUNTRY || "CN").toUpperCase();
+  if (freeProxyMode) {
+    console.log(`Fetching free ${freeProxyCountry} proxy from freeproxy.world...`);
+    const cnProxy = await findWorkingFreeProxy(freeProxyCountry);
+    const slug = freeProxyCountry.toLowerCase();
+    console.log(`Taking ${freeProxyCountry} screenshot...`);
+    const result = await takeScreenshot(cnProxy, slug, freeProxyCountry.toLowerCase(), "en-US", cnProxy.ipLabel, unixTs);
+    freeProxyResult = { ...result, country: freeProxyCountry };
+  }
+
   for (const channelId of channelIds) {
     await postToChannel(channelId, botToken, defaultPath, defaultHtml, defaultTabs, `🌐 Steam homepage · Default · \`${defaultIp}\``, unixTs, isoDate, false);
     await postToChannel(channelId, botToken, gbPath, gbHtml, gbTabs, `🇬🇧 Steam homepage · UK · \`${gbIp}\``, unixTs, isoDate, false);
-    await postToChannel(channelId, botToken, jpPath, jpHtml, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, true);
+    await postToChannel(channelId, botToken, jpPath, jpHtml, jpTabs, `🇯🇵 Steam homepage · Japan · \`${jpIp}\``, unixTs, isoDate, !freeProxyMode);
+    if (freeProxyResult) {
+      const cc = freeProxyResult.country;
+      const flag = cc.split("").map((c) => String.fromCodePoint(0x1f1e6 + c.charCodeAt(0) - 65)).join("");
+      await postToChannel(channelId, botToken, freeProxyResult.screenshotPath, freeProxyResult.htmlPath, freeProxyResult.tabData,
+        `${flag} Steam homepage · ${cc} (freeproxy.world) · \`${freeProxyResult.ipLabel}\``, unixTs, isoDate, true);
+    }
   }
 
   fs.unlinkSync(defaultPath);
@@ -263,6 +325,10 @@ async function run() {
   fs.unlinkSync(gbHtml);
   fs.unlinkSync(jpPath);
   fs.unlinkSync(jpHtml);
+  if (freeProxyResult) {
+    fs.unlinkSync(freeProxyResult.screenshotPath);
+    fs.unlinkSync(freeProxyResult.htmlPath);
+  }
   console.log("Done:", new Date().toISOString());
 }
 

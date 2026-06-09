@@ -9,6 +9,16 @@ on:
         description: "Comma-separated Discord channel IDs (leave empty to query D1)"
         required: false
         type: string
+      free_proxy_mode:
+        description: "Use freeproxy.world to capture an extra region screenshot"
+        required: false
+        type: boolean
+        default: false
+      free_proxy_country:
+        description: "Country code for freeproxy.world (default: CN)"
+        required: false
+        type: string
+        default: "CN"
 
 jobs:
   screenshot:
@@ -33,4 +43,6 @@ jobs:
           CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
           CHANNEL_IDS: ${{ inputs.channel_ids }}
           WEBSHARE_API_KEY: ${{ secrets.WEBSHARE_API_KEY }}
+          FREE_PROXY_MODE: ${{ inputs.free_proxy_mode }}
+          FREE_PROXY_COUNTRY: ${{ inputs.free_proxy_country || 'CN' }}
 
