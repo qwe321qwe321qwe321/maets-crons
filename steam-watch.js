@@ -52,7 +52,9 @@ function generateSessionId() {
 	return Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
-async function fetchSteamFollowers(appid, retries = 2) {
+const FOLLOWER_RETRY_DELAYS = [15000, 30000, 60000];
+
+async function fetchSteamFollowers(appid, attempt = 0) {
 	const sessionid = generateSessionId();
 	const res = await fetch(
 		`https://steamcommunity.com/search/SearchCommunityAjax?text=${appid}&filter=groups&sessionid=${sessionid}&steamid_user=false`,
@@ -65,13 +67,14 @@ async function fetchSteamFollowers(appid, retries = 2) {
 		}
 	);
 	if (res.status === 429) {
-		if (retries <= 0) {
-			console.error(`[followers][${appid}] 429, no retries left`);
+		const delay = FOLLOWER_RETRY_DELAYS[attempt];
+		if (delay == null) {
+			console.error(`[followers][${appid}] 429, giving up after ${attempt} retries`);
 			return null;
 		}
-		console.warn(`[followers][${appid}] 429, waiting 15s before retry (${retries} left)`);
-		await new Promise(r => setTimeout(r, 15000));
-		return fetchSteamFollowers(appid, retries - 1);
+		console.warn(`[followers][${appid}] 429, waiting ${delay / 1000}s before retry (attempt ${attempt + 1}/${FOLLOWER_RETRY_DELAYS.length})`);
+		await new Promise(r => setTimeout(r, delay));
+		return fetchSteamFollowers(appid, attempt + 1);
 	}
 	if (!res.ok) {
 		console.error(`[followers][${appid}] HTTP ${res.status}`);
