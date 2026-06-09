@@ -18,51 +18,24 @@ async function d1(sql, params = []) {
   return json.result[0].results;
 }
 
-async function fetchFreeProxyWorldList(countryCode) {
+async function fetchProxyScrapeList(countryCode) {
   const candidates = [];
-  const browser = await chromium.launch();
-  try {
-    const context = await browser.newContext();
-    for (const type of ["socks5", "socks4"]) {
-      const url = `https://www.freeproxy.world/?type=${type}&country=${countryCode.toLowerCase()}`;
-      const page = await context.newPage();
-      try {
-        await page.goto(url, { waitUntil: "load", timeout: 30000 });
-        await page.waitForSelector("table", { timeout: 10000 }).catch(() => {});
-        const debug = await page.evaluate(() => ({
-          title: document.title,
-          allTrs: document.querySelectorAll("tr").length,
-          bodySnippet: document.body?.innerHTML?.slice(0, 800),
-        }));
-        console.log(`freeproxy.world ${type}/${countryCode} debug:`, JSON.stringify(debug));
-        const rows = await page.$$eval("table tbody tr", (trs) =>
-          trs.flatMap((tr) => {
-            const tds = tr.querySelectorAll("td");
-            const ip = tds[0]?.textContent?.trim();
-            const port = tds[1]?.textContent?.trim();
-            return ip && port && /^\d{1,3}(\.\d{1,3}){3}$/.test(ip) && /^\d+$/.test(port)
-              ? [{ ip, port }]
-              : [];
-          })
-        );
-        for (const { ip, port } of rows) {
-          candidates.push({ server: `${type}://${ip}:${port}` });
-        }
-        console.log(`freeproxy.world ${type}/${countryCode}: found ${rows.length} candidates`);
-      } catch (e) {
-        console.warn(`freeproxy.world scrape failed (${type}): ${e.message}`);
-      } finally {
-        await page.close();
-      }
+  for (const protocol of ["socks5", "socks4"]) {
+    const url = `https://api.proxyscrape.com/v2/?request=getproxies&protocol=${protocol}&country=${countryCode}&timeout=10000&simplified=true`;
+    const res = await fetch(url);
+    if (!res.ok) { console.warn(`proxyscrape fetch failed (${protocol}): ${res.status}`); continue; }
+    const text = await res.text();
+    const lines = text.trim().split("\n").map((l) => l.trim()).filter((l) => /^\d+\.\d+\.\d+\.\d+:\d+$/.test(l));
+    for (const line of lines) {
+      candidates.push({ server: `${protocol}://${line}` });
     }
-  } finally {
-    await browser.close();
+    console.log(`proxyscrape ${protocol}/${countryCode}: found ${lines.length} candidates`);
   }
   return candidates;
 }
 
 async function findWorkingFreeProxy(countryCode) {
-  const candidates = await fetchFreeProxyWorldList(countryCode);
+  const candidates = await fetchProxyScrapeList(countryCode);
   if (candidates.length === 0) throw new Error(`No free proxies found for ${countryCode}`);
   console.log(`Testing up to ${Math.min(candidates.length, 20)} proxies for ${countryCode}...`);
   for (const candidate of candidates.slice(0, 20)) {
