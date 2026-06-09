@@ -232,7 +232,19 @@ async function runDailyReport(filterChannelId = '') {
 		const header = `**Steam Watch · ${isoDate}**\n<t:${unixTs}:F>`;
 		const blocks = [];
 
-		for (const app of apps) {
+		const sortedApps = [...apps].sort((a, b) => {
+			const da = dataMap.get(a.appid);
+			const db = dataMap.get(b.appid);
+			// group 0: coming soon with wishlist rank, 1: coming soon unranked, 2: released
+			const groupA = !da?.comingSoon ? 2 : (da.wishlistRank != null ? 0 : 1);
+			const groupB = !db?.comingSoon ? 2 : (db.wishlistRank != null ? 0 : 1);
+			if (groupA !== groupB) return groupA - groupB;
+			if (groupA === 0) return da.wishlistRank - db.wishlistRank;
+			if (groupA === 1) return (db.followers ?? -1) - (da.followers ?? -1);
+			return (db.reviews?.total ?? -1) - (da.reviews?.total ?? -1);
+		});
+
+		for (const app of sortedApps) {
 			const d = dataMap.get(app.appid);
 			if (!d) continue;
 
