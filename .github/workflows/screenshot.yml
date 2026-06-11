@@ -14,6 +14,16 @@ on:
         required: false
         type: boolean
         default: false
+      gb_only:
+        description: "Only capture GB screenshot (for retry)"
+        required: false
+        type: boolean
+        default: false
+      jp_only:
+        description: "Only capture JP screenshot (for retry)"
+        required: false
+        type: boolean
+        default: false
 jobs:
   screenshot:
     runs-on: ubuntu-latest
@@ -44,4 +54,6 @@ jobs:
           CHANNEL_IDS: ${{ inputs.channel_ids }}
           WEBSHARE_API_KEY: ${{ secrets.WEBSHARE_API_KEY }}
           CN_ONLY: ${{ inputs.cn_only }}
+          GB_ONLY: ${{ inputs.gb_only }}
+          JP_ONLY: ${{ inputs.jp_only }}
 

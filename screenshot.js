@@ -148,6 +148,16 @@ const CAPTURE_NOW_BUTTON = {
   components: [{ type: 2, style: 1, custom_id: "capture_now", emoji: { name: "📸" }, label: "Capture Now" }],
 };
 
+const RETRY_GB_BUTTON = {
+  type: 1,
+  components: [{ type: 2, style: 4, custom_id: "retry_gb", emoji: { name: "🔁" }, label: "再試一次" }],
+};
+
+const RETRY_JP_BUTTON = {
+  type: 1,
+  components: [{ type: 2, style: 4, custom_id: "retry_jp", emoji: { name: "🔁" }, label: "再試一次" }],
+};
+
 const RETRY_CN_BUTTON = {
   type: 1,
   components: [{ type: 2, style: 4, custom_id: "retry_cn", emoji: { name: "🔁" }, label: "再試一次" }],
@@ -261,6 +271,52 @@ async function run() {
     return;
   }
 
+  async function runSingleCountry(cc, slug, locale, pageLoadOptions, retryButton, label) {
+    let result = null;
+    let error = null;
+    try {
+      const proxies = await getBrowserProxies(cc);
+      for (const proxy of proxies) {
+        console.log(`Trying ${proxy.server} for ${cc} screenshot...`);
+        try {
+          result = await takeScreenshot(proxy, slug, cc.toLowerCase(), locale, proxy.ipLabel, unixTs, pageLoadOptions);
+          break;
+        } catch (e) {
+          console.log(`${cc} screenshot failed with ${proxy.server}: ${e.message}`);
+        }
+      }
+      if (!result) error = new Error(`All verified ${cc} proxies failed to load Steam`);
+    } catch (e) {
+      error = e;
+    }
+    for (const channelId of channelIds) {
+      if (result) {
+        await postToChannel(channelId, botToken, result.screenshotPath, result.htmlPath, result.tabData,
+          `${label} · \`${result.ipLabel}\``, unixTs, isoDate, false);
+      } else {
+        await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+          method: "POST",
+          headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ content: `${label} · ⚠️ 截圖失敗: \`${error.message}\``, components: [retryButton] }),
+        });
+      }
+    }
+    if (result) { fs.unlinkSync(result.screenshotPath); fs.unlinkSync(result.htmlPath); }
+    console.log("Done:", new Date().toISOString());
+  }
+
+  if (process.env.GB_ONLY === "true") {
+    console.log("GB-only mode: retrying GB screenshot...");
+    await runSingleCountry("GB", "gb", "en-GB", { waitAfterScroll: 15000 }, RETRY_GB_BUTTON, "🇬🇧 Steam homepage · UK");
+    return;
+  }
+
+  if (process.env.JP_ONLY === "true") {
+    console.log("JP-only mode: retrying JP screenshot...");
+    await runSingleCountry("JP", "japan", "ja-JP", { waitAfterScroll: 15000 }, RETRY_JP_BUTTON, "🇯🇵 Steam homepage · Japan");
+    return;
+  }
+
   console.log("Taking all screenshots in parallel...");
 
   async function captureWithFreeProxy(cc, slug, locale, pageLoadOptions = {}) {
@@ -278,8 +334,8 @@ async function run() {
 
   const [defaultResult, gbOutcome, jpOutcome, cnOutcome] = await Promise.all([
     takeScreenshot(null, "default", null, "en-US", null, unixTs),
-    captureWithFreeProxy("GB", "gb", "en-GB").catch((e) => ({ error: e })),
-    captureWithFreeProxy("JP", "japan", "ja-JP").catch((e) => ({ error: e })),
+    captureWithFreeProxy("GB", "gb", "en-GB", { waitAfterScroll: 15000 }).catch((e) => ({ error: e })),
+    captureWithFreeProxy("JP", "japan", "ja-JP", { waitAfterScroll: 15000 }).catch((e) => ({ error: e })),
     captureWithFreeProxy("CN", "cn", "zh-CN", { waitUntil: "domcontentloaded", waitForContent: true, timeout: 90000, waitAfterScroll: 20000 }).catch((e) => ({ error: e })),
   ]);
 
@@ -301,7 +357,7 @@ async function run() {
       await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST",
         headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ content: `🇬🇧 Steam homepage · UK · ⚠️ 截圖失敗: \`${gbError.message}\`` }),
+        body: JSON.stringify({ content: `🇬🇧 Steam homepage · UK · ⚠️ 截圖失敗: \`${gbError.message}\``, components: [RETRY_GB_BUTTON] }),
       });
     }
     if (jpResult) {
@@ -310,7 +366,7 @@ async function run() {
       await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST",
         headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ content: `🇯🇵 Steam homepage · Japan · ⚠️ 截圖失敗: \`${jpError.message}\`` }),
+        body: JSON.stringify({ content: `🇯🇵 Steam homepage · Japan · ⚠️ 截圖失敗: \`${jpError.message}\``, components: [RETRY_JP_BUTTON] }),
       });
     }
     if (cnResult) {

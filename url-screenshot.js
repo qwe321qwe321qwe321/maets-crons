@@ -103,13 +103,11 @@ async function captureForCountry(targetUrl, country) {
     return takeUrlScreenshot(targetUrl, null, slug);
   }
   const cc = country.toUpperCase();
-  const isCn = country === "cn";
   const proxies = await getBrowserProxies(cc);
   for (const proxy of proxies) {
     console.log(`Trying ${proxy.server} for ${cc}...`);
     try {
-      return await takeUrlScreenshot(targetUrl, proxy, slug, proxy.ipLabel,
-        isCn ? { waitAfterScroll: 20000 } : {});
+      return await takeUrlScreenshot(targetUrl, proxy, slug, proxy.ipLabel, { waitAfterScroll: 20000 });
     } catch (e) {
       console.log(`${cc} failed with ${proxy.server}: ${e.message}`);
     }
