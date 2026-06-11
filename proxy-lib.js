@@ -43,15 +43,22 @@ async function _fetchProxyScrapeList(cc, protocols) {
   return candidates;
 }
 
+function _forceClose(browser) {
+  return Promise.race([
+    browser.close().catch(() => {}),
+    new Promise(resolve => setTimeout(resolve, 5000)),
+  ]);
+}
+
 async function _verifyBrowserProxy(proxyServer, expectedCountry) {
   const { chromium } = require("playwright");
   const browser = await chromium.launch();
   try {
     const ctx = await browser.newContext({ proxy: { server: proxyServer } });
     const page = await ctx.newPage();
-    const res = await page.goto("https://ipinfo.io/json", { timeout: 15000 });
+    const res = await page.goto("https://ipinfo.io/json", { timeout: 12000 });
     const data = await res.json().catch(() => null);
-    await browser.close();
+    await _forceClose(browser);
     if (data?.country === expectedCountry) {
       return `${data.ip}${data.city ? ` (${data.city}, ${data.country})` : ""}`;
     }
@@ -59,7 +66,7 @@ async function _verifyBrowserProxy(proxyServer, expectedCountry) {
     return null;
   } catch (e) {
     console.log(`[proxy-lib] ${proxyServer} failed: ${e.message}`);
-    await browser.close().catch(() => {});
+    await _forceClose(browser);
     return null;
   }
 }
