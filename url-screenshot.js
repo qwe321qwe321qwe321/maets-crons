@@ -114,11 +114,17 @@ async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null) {
   await page.waitForTimeout(3000);
   await page.evaluate(() => window.scrollTo(0, 0));
 
-  const screenshotPath = path.join(__dirname, `url_screenshot_${slug}_${Date.now()}.png`);
+  const ts = Date.now();
+  const screenshotPath = path.join(__dirname, `url_screenshot_${slug}_${ts}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
+
+  const htmlContent = await page.content();
+  const htmlPath = path.join(__dirname, `url_screenshot_${slug}_${ts}.html`);
+  fs.writeFileSync(htmlPath, htmlContent, "utf8");
+
   await browser.close();
 
-  return { screenshotPath, ipLabel };
+  return { screenshotPath, htmlPath, ipLabel };
 }
 
 const CAPTURE_URL_NOW_BUTTON = {
@@ -126,10 +132,13 @@ const CAPTURE_URL_NOW_BUTTON = {
   components: [{ type: 2, style: 1, custom_id: "capture_url_now", emoji: { name: "📸" }, label: "Capture Now" }],
 };
 
-async function postUrlScreenshot(channelId, botToken, screenshotPath, label, targetUrl, isoDate, unixTs, showButton) {
-  const content = `${label} · <t:${unixTs}:F>\n${targetUrl}`;
+async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, label, targetUrl, unixTs, showButton) {
+  const content = targetUrl
+    ? `${label} · <t:${unixTs}:F>\n<${targetUrl}>`
+    : `${label} · <t:${unixTs}:F>`;
   const formData = new FormData();
   formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/png" }), "screenshot.png");
+  formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
   formData.append("payload_json", JSON.stringify({
     content,
     ...(showButton ? { components: [CAPTURE_URL_NOW_BUTTON] } : {}),
@@ -175,7 +184,6 @@ async function run() {
   }
 
   const unixTs = Math.floor(Date.now() / 1000);
-  const isoDate = new Date().toISOString();
 
   for (const [targetUrl, channelIds] of Object.entries(urlToChannels)) {
     console.log(`\nProcessing: ${targetUrl} (channels: ${channelIds.join(", ")})`);
@@ -201,17 +209,18 @@ async function run() {
     if (cnError) console.error(`CN failed: ${cnError.message}`);
 
     for (const channelId of channelIds) {
-      await postUrlScreenshot(channelId, botToken, defaultResult.screenshotPath, `🌐 \`${defaultResult.ipLabel}\``, targetUrl, isoDate, unixTs, false);
-      await postUrlScreenshot(channelId, botToken, gbResult.screenshotPath, `🇬🇧 \`${gbResult.ipLabel}\``, targetUrl, isoDate, unixTs, false);
-      await postUrlScreenshot(channelId, botToken, jpResult.screenshotPath, `🇯🇵 \`${jpResult.ipLabel}\``, targetUrl, isoDate, unixTs, false);
+      // Only the first message includes the URL (no embed via <url>)
+      await postUrlScreenshot(channelId, botToken, defaultResult.screenshotPath, defaultResult.htmlPath, `🌐 \`${defaultResult.ipLabel}\``, targetUrl, unixTs, false);
+      await postUrlScreenshot(channelId, botToken, gbResult.screenshotPath, gbResult.htmlPath, `🇬🇧 \`${gbResult.ipLabel}\``, null, unixTs, false);
+      await postUrlScreenshot(channelId, botToken, jpResult.screenshotPath, jpResult.htmlPath, `🇯🇵 \`${jpResult.ipLabel}\``, null, unixTs, false);
       if (cnResult) {
-        await postUrlScreenshot(channelId, botToken, cnResult.screenshotPath, `🇨🇳 \`${cnResult.ipLabel}\``, targetUrl, isoDate, unixTs, true);
+        await postUrlScreenshot(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, `🇨🇳 \`${cnResult.ipLabel}\``, null, unixTs, true);
       } else {
         await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
           method: "POST",
           headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
           body: JSON.stringify({
-            content: `🇨🇳 CN · ⚠️ 截圖失敗: \`${cnError.message}\`\n${targetUrl}`,
+            content: `🇨🇳 CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
             components: [CAPTURE_URL_NOW_BUTTON],
           }),
         });
@@ -219,9 +228,15 @@ async function run() {
     }
 
     fs.unlinkSync(defaultResult.screenshotPath);
+    fs.unlinkSync(defaultResult.htmlPath);
     fs.unlinkSync(gbResult.screenshotPath);
+    fs.unlinkSync(gbResult.htmlPath);
     fs.unlinkSync(jpResult.screenshotPath);
-    if (cnResult) fs.unlinkSync(cnResult.screenshotPath);
+    fs.unlinkSync(jpResult.htmlPath);
+    if (cnResult) {
+      fs.unlinkSync(cnResult.screenshotPath);
+      fs.unlinkSync(cnResult.htmlPath);
+    }
   }
 
   console.log("Done:", new Date().toISOString());
