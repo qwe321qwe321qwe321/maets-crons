@@ -9,6 +9,10 @@ on:
         description: "Discord channel ID (leave empty to query all tracked URLs from D1)"
         required: false
         type: string
+      country:
+        description: "Retry a single country: default | gb | jp | cn (leave empty to run all)"
+        required: false
+        type: string
 
 jobs:
   screenshot:
@@ -38,4 +42,5 @@ jobs:
           CF_ACCOUNT_ID: ${{ secrets.CF_ACCOUNT_ID }}
           CF_D1_DATABASE_ID: ${{ secrets.CF_D1_DATABASE_ID }}
           CHANNEL_ID: ${{ inputs.channel_id }}
+          COUNTRY: ${{ inputs.country }}
           WEBSHARE_API_KEY: ${{ secrets.WEBSHARE_API_KEY }}

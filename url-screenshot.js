@@ -127,12 +127,48 @@ async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null) {
   return { screenshotPath, htmlPath, ipLabel };
 }
 
+// country -> { emoji, slug }
+const COUNTRY_META = {
+  default: { emoji: "🌐", slug: "default" },
+  gb:      { emoji: "🇬🇧", slug: "gb" },
+  jp:      { emoji: "🇯🇵", slug: "jp" },
+  cn:      { emoji: "🇨🇳", slug: "cn" },
+};
+
 const CAPTURE_URL_NOW_BUTTON = {
   type: 1,
   components: [{ type: 2, style: 1, custom_id: "capture_url_now", emoji: { name: "📸" }, label: "Capture Now" }],
 };
 
-async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, label, targetUrl, unixTs, showButton) {
+function retryUrlButton(country) {
+  return {
+    type: 1,
+    components: [{ type: 2, style: 4, custom_id: `retry_url_${country}`, emoji: { name: COUNTRY_META[country].emoji }, label: "再試一次" }],
+  };
+}
+
+async function captureForCountry(targetUrl, country) {
+  const { slug } = COUNTRY_META[country];
+  if (country === "default") {
+    return takeUrlScreenshot(targetUrl, null, slug);
+  }
+  if (country === "gb" || country === "jp") {
+    const p = await fetchProxyByCountry(country.toUpperCase());
+    return takeUrlScreenshot(targetUrl, p, slug, p.ipLabel);
+  }
+  if (country === "cn") {
+    const proxies = await findWorkingFreeProxy("CN");
+    for (const proxy of proxies) {
+      console.log(`Trying ${proxy.server} for CN...`);
+      try { return await takeUrlScreenshot(targetUrl, proxy, slug, proxy.ipLabel); }
+      catch (e) { console.log(`CN failed with ${proxy.server}: ${e.message}`); }
+    }
+    throw new Error("All verified CN proxies failed");
+  }
+  throw new Error(`Unknown country: ${country}`);
+}
+
+async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, label, targetUrl, unixTs, button) {
   const content = targetUrl
     ? `${label} · <t:${unixTs}:F>\n<${targetUrl}>`
     : `${label} · <t:${unixTs}:F>`;
@@ -141,7 +177,7 @@ async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, 
   formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
   formData.append("payload_json", JSON.stringify({
     content,
-    ...(showButton ? { components: [CAPTURE_URL_NOW_BUTTON] } : {}),
+    ...(button ? { components: [button] } : {}),
   }));
   const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
     method: "POST",
@@ -153,11 +189,23 @@ async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, 
   }
 }
 
+async function postError(channelId, botToken, emoji, errorMsg, button) {
+  await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      content: `${emoji} ⚠️ 截圖失敗: \`${errorMsg}\``,
+      components: [button],
+    }),
+  });
+}
+
 async function run() {
   const botToken = process.env.DISCORD_TOKEN;
   if (!botToken) throw new Error("DISCORD_TOKEN not set");
 
   const channelIdFilter = process.env.CHANNEL_ID?.trim() || null;
+  const countryFilter = process.env.COUNTRY?.trim().toLowerCase() || null;
 
   let rows;
   if (channelIdFilter) {
@@ -185,57 +233,73 @@ async function run() {
 
   const unixTs = Math.floor(Date.now() / 1000);
 
-  for (const [targetUrl, channelIds] of Object.entries(urlToChannels)) {
-    console.log(`\nProcessing: ${targetUrl} (channels: ${channelIds.join(", ")})`);
+  // Retry mode: only one country
+  if (countryFilter) {
+    if (!COUNTRY_META[countryFilter]) throw new Error(`Unknown COUNTRY: ${countryFilter}`);
+    const { emoji } = COUNTRY_META[countryFilter];
+    console.log(`Retry mode: country=${countryFilter}`);
 
-    const [defaultResult, gbResult, jpResult, cnOutcome] = await Promise.all([
-      takeUrlScreenshot(targetUrl, null, "default"),
-      fetchProxyByCountry("GB").then((p) => takeUrlScreenshot(targetUrl, p, "gb", p.ipLabel)),
-      fetchProxyByCountry("JP").then((p) => takeUrlScreenshot(targetUrl, p, "jp", p.ipLabel)),
-      findWorkingFreeProxy("CN")
-        .then(async (proxies) => {
-          for (const proxy of proxies) {
-            console.log(`Trying ${proxy.server} for CN...`);
-            try { return await takeUrlScreenshot(targetUrl, proxy, "cn", proxy.ipLabel); }
-            catch (e) { console.log(`CN failed with ${proxy.server}: ${e.message}`); }
-          }
-          throw new Error("All verified CN proxies failed");
-        })
-        .catch((e) => ({ error: e })),
-    ]);
+    for (const [targetUrl, channelIds] of Object.entries(urlToChannels)) {
+      console.log(`\nProcessing [${countryFilter}]: ${targetUrl}`);
+      const result = await captureForCountry(targetUrl, countryFilter).catch((e) => ({ error: e }));
 
-    const cnResult = cnOutcome?.error ? null : cnOutcome;
-    const cnError = cnOutcome?.error ?? null;
-    if (cnError) console.error(`CN failed: ${cnError.message}`);
+      for (const channelId of channelIds) {
+        if (result.error) {
+          console.error(`${countryFilter} failed: ${result.error.message}`);
+          await postError(channelId, botToken, emoji, result.error.message, retryUrlButton(countryFilter));
+        } else {
+          const button = countryFilter === "cn" ? CAPTURE_URL_NOW_BUTTON : null;
+          // Show URL in retry messages so context is clear
+          await postUrlScreenshot(channelId, botToken, result.screenshotPath, result.htmlPath,
+            `${emoji} \`${result.ipLabel}\``, targetUrl, unixTs, button);
+        }
+      }
 
-    for (const channelId of channelIds) {
-      // Only the first message includes the URL (no embed via <url>)
-      await postUrlScreenshot(channelId, botToken, defaultResult.screenshotPath, defaultResult.htmlPath, `🌐 \`${defaultResult.ipLabel}\``, targetUrl, unixTs, false);
-      await postUrlScreenshot(channelId, botToken, gbResult.screenshotPath, gbResult.htmlPath, `🇬🇧 \`${gbResult.ipLabel}\``, null, unixTs, false);
-      await postUrlScreenshot(channelId, botToken, jpResult.screenshotPath, jpResult.htmlPath, `🇯🇵 \`${jpResult.ipLabel}\``, null, unixTs, false);
-      if (cnResult) {
-        await postUrlScreenshot(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, `🇨🇳 \`${cnResult.ipLabel}\``, null, unixTs, true);
-      } else {
-        await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-          method: "POST",
-          headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `🇨🇳 CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
-            components: [CAPTURE_URL_NOW_BUTTON],
-          }),
-        });
+      if (!result.error) {
+        fs.unlinkSync(result.screenshotPath);
+        fs.unlinkSync(result.htmlPath);
       }
     }
 
-    fs.unlinkSync(defaultResult.screenshotPath);
-    fs.unlinkSync(defaultResult.htmlPath);
-    fs.unlinkSync(gbResult.screenshotPath);
-    fs.unlinkSync(gbResult.htmlPath);
-    fs.unlinkSync(jpResult.screenshotPath);
-    fs.unlinkSync(jpResult.htmlPath);
-    if (cnResult) {
-      fs.unlinkSync(cnResult.screenshotPath);
-      fs.unlinkSync(cnResult.htmlPath);
+    console.log("Done:", new Date().toISOString());
+    return;
+  }
+
+  // Normal mode: all 4 countries in parallel
+  const countries = ["default", "gb", "jp", "cn"];
+
+  for (const [targetUrl, channelIds] of Object.entries(urlToChannels)) {
+    console.log(`\nProcessing: ${targetUrl} (channels: ${channelIds.join(", ")})`);
+
+    const outcomes = await Promise.all(
+      countries.map((c) => captureForCountry(targetUrl, c).catch((e) => ({ error: e })))
+    );
+
+    for (const channelId of channelIds) {
+      let isFirst = true;
+      for (let i = 0; i < countries.length; i++) {
+        const country = countries[i];
+        const outcome = outcomes[i];
+        const { emoji } = COUNTRY_META[country];
+
+        if (outcome.error) {
+          console.error(`${country} failed: ${outcome.error.message}`);
+          await postError(channelId, botToken, emoji, outcome.error.message, retryUrlButton(country));
+        } else {
+          const button = country === "cn" ? CAPTURE_URL_NOW_BUTTON : null;
+          const urlToShow = isFirst ? targetUrl : null;
+          await postUrlScreenshot(channelId, botToken, outcome.screenshotPath, outcome.htmlPath,
+            `${emoji} \`${outcome.ipLabel}\``, urlToShow, unixTs, button);
+          isFirst = false;
+        }
+      }
+    }
+
+    for (const outcome of outcomes) {
+      if (!outcome.error) {
+        fs.unlinkSync(outcome.screenshotPath);
+        fs.unlinkSync(outcome.htmlPath);
+      }
     }
   }
 
