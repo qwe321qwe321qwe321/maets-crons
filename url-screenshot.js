@@ -127,6 +127,13 @@ async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null) {
   return { screenshotPath, htmlPath, ipLabel };
 }
 
+// Returns proxy country keys to capture in addition to 'default'
+function parseCountries(countries) {
+  if (!countries || countries === "all") return ["gb", "jp", "cn"];
+  if (countries === "none") return [];
+  return countries.split(",").map((c) => c.trim().toLowerCase()).filter((c) => ["gb", "jp", "cn"].includes(c));
+}
+
 // country -> { emoji, slug }
 const COUNTRY_META = {
   default: { emoji: "🌐", slug: "default" },
@@ -210,25 +217,16 @@ async function run() {
   let rows;
   if (channelIdFilter) {
     rows = await d1(
-      "SELECT guild_id, channel_id, url FROM tracked_screenshot_urls WHERE channel_id = ?",
+      "SELECT guild_id, channel_id, url, countries FROM tracked_screenshot_urls WHERE channel_id = ?",
       [channelIdFilter]
     );
   } else {
-    rows = await d1("SELECT guild_id, channel_id, url FROM tracked_screenshot_urls");
+    rows = await d1("SELECT guild_id, channel_id, url, countries FROM tracked_screenshot_urls");
   }
 
   if (rows.length === 0) {
     console.log("No tracked URLs, skipping.");
     return;
-  }
-
-  // Group: url -> [channelId, ...]
-  const urlToChannels = {};
-  for (const row of rows) {
-    if (!urlToChannels[row.url]) urlToChannels[row.url] = [];
-    if (!urlToChannels[row.url].includes(row.channel_id)) {
-      urlToChannels[row.url].push(row.channel_id);
-    }
   }
 
   const unixTs = Math.floor(Date.now() / 1000);
@@ -239,23 +237,23 @@ async function run() {
     const { emoji } = COUNTRY_META[countryFilter];
     console.log(`Retry mode: country=${countryFilter}`);
 
-    for (const [targetUrl, channelIds] of Object.entries(urlToChannels)) {
-      console.log(`\nProcessing [${countryFilter}]: ${targetUrl}`);
-      const result = await captureForCountry(targetUrl, countryFilter).catch((e) => ({ error: e }));
-
-      for (const channelId of channelIds) {
-        if (result.error) {
-          console.error(`${countryFilter} failed: ${result.error.message}`);
-          await postError(channelId, botToken, emoji, result.error.message, retryUrlButton(countryFilter));
-        } else {
-          const button = countryFilter === "cn" ? CAPTURE_URL_NOW_BUTTON : null;
-          // Show URL in retry messages so context is clear
-          await postUrlScreenshot(channelId, botToken, result.screenshotPath, result.htmlPath,
-            `${emoji} \`${result.ipLabel}\``, targetUrl, unixTs, button);
-        }
+    for (const row of rows) {
+      // Skip if this URL's config doesn't include the country being retried
+      const rowCountries = ["default", ...parseCountries(row.countries || "all")];
+      if (!rowCountries.includes(countryFilter)) {
+        console.log(`Skipping ${row.url} (not in config: ${row.countries})`);
+        continue;
       }
+      console.log(`\nProcessing [${countryFilter}]: ${row.url}`);
+      const result = await captureForCountry(row.url, countryFilter).catch((e) => ({ error: e }));
 
-      if (!result.error) {
+      if (result.error) {
+        console.error(`${countryFilter} failed: ${result.error.message}`);
+        await postError(row.channel_id, botToken, emoji, result.error.message, retryUrlButton(countryFilter));
+      } else {
+        const button = countryFilter === "cn" ? CAPTURE_URL_NOW_BUTTON : null;
+        await postUrlScreenshot(row.channel_id, botToken, result.screenshotPath, result.htmlPath,
+          `${emoji} \`${result.ipLabel}\``, row.url, unixTs, button);
         fs.unlinkSync(result.screenshotPath);
         fs.unlinkSync(result.htmlPath);
       }
@@ -265,20 +263,27 @@ async function run() {
     return;
   }
 
-  // Normal mode: all 4 countries in parallel
-  const countries = ["default", "gb", "jp", "cn"];
+  // Normal mode: group by (url, countries) to avoid duplicate captures
+  const groups = new Map();
+  for (const row of rows) {
+    const key = `${row.url}\x00${row.countries || "all"}`;
+    if (!groups.has(key)) groups.set(key, { url: row.url, countries: row.countries || "all", channelIds: [] });
+    const g = groups.get(key);
+    if (!g.channelIds.includes(row.channel_id)) g.channelIds.push(row.channel_id);
+  }
 
-  for (const [targetUrl, channelIds] of Object.entries(urlToChannels)) {
-    console.log(`\nProcessing: ${targetUrl} (channels: ${channelIds.join(", ")})`);
+  for (const { url: targetUrl, countries: countriesConfig, channelIds } of groups.values()) {
+    const countriesToCapture = ["default", ...parseCountries(countriesConfig)];
+    console.log(`\nProcessing: ${targetUrl} [${countriesConfig}] (channels: ${channelIds.join(", ")})`);
 
     const outcomes = await Promise.all(
-      countries.map((c) => captureForCountry(targetUrl, c).catch((e) => ({ error: e })))
+      countriesToCapture.map((c) => captureForCountry(targetUrl, c).catch((e) => ({ error: e })))
     );
 
     for (const channelId of channelIds) {
       let isFirst = true;
-      for (let i = 0; i < countries.length; i++) {
-        const country = countries[i];
+      for (let i = 0; i < countriesToCapture.length; i++) {
+        const country = countriesToCapture[i];
         const outcome = outcomes[i];
         const { emoji } = COUNTRY_META[country];
 
@@ -286,7 +291,8 @@ async function run() {
           console.error(`${country} failed: ${outcome.error.message}`);
           await postError(channelId, botToken, emoji, outcome.error.message, retryUrlButton(country));
         } else {
-          const button = country === "cn" ? CAPTURE_URL_NOW_BUTTON : null;
+          const isLast = i === countriesToCapture.length - 1;
+          const button = isLast ? CAPTURE_URL_NOW_BUTTON : null;
           const urlToShow = isFirst ? targetUrl : null;
           await postUrlScreenshot(channelId, botToken, outcome.screenshotPath, outcome.htmlPath,
             `${emoji} \`${outcome.ipLabel}\``, urlToShow, unixTs, button);
