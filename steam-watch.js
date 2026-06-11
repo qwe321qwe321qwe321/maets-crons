@@ -5,28 +5,7 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const WEBSHARE_API_KEY = process.env.WEBSHARE_API_KEY;
 
 const { ProxyAgent, fetch: proxyFetch } = require('undici');
-
-let webshareProxies = null;
-
-async function loadWebshareProxies() {
-	if (webshareProxies !== null) return webshareProxies;
-	if (!WEBSHARE_API_KEY) { webshareProxies = []; return []; }
-	try {
-		const res = await fetch('https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page=1&page_size=25', {
-			headers: { 'Authorization': `Token ${WEBSHARE_API_KEY}` },
-		});
-		if (!res.ok) { webshareProxies = []; return []; }
-		const json = await res.json();
-		webshareProxies = (json.results ?? []).map(p =>
-			`http://${p.username}:${p.password}@${p.proxy_address}:${p.port}`
-		);
-		console.log(`[webshare] loaded ${webshareProxies.length} proxies`);
-	} catch (e) {
-		console.error(`[webshare] failed to load proxies: ${e}`);
-		webshareProxies = [];
-	}
-	return webshareProxies;
-}
+const { getHttpProxies } = require('./proxy-lib');
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${CF_D1_DATABASE_ID}/query`;
 
@@ -88,7 +67,7 @@ async function fetchSteamFollowers(appid, attempt = 0) {
 		'Referer': 'https://steamcommunity.com/search/groups',
 	};
 
-	const proxies = await loadWebshareProxies();
+	const proxies = await getHttpProxies({ webshareApiKey: WEBSHARE_API_KEY });
 	let res;
 	if (attempt > 0 && proxies.length > 0) {
 		const proxyUrl = proxies[(attempt - 1) % proxies.length];

@@ -1,6 +1,7 @@
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
+const { getBrowserProxies } = require("./proxy-lib");
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/d1/database/${process.env.CF_D1_DATABASE_ID}/query`;
 
@@ -18,65 +19,7 @@ async function d1(sql, params = []) {
   return json.result[0].results;
 }
 
-async function fetchProxyScrapeList(countryCode) {
-  const candidates = [];
-  for (const protocol of ["socks5", "socks4"]) {
-    const url = `https://api.proxyscrape.com/v2/?request=getproxies&protocol=${protocol}&country=${countryCode}&timeout=10000&simplified=true`;
-    const res = await fetch(url);
-    if (!res.ok) { console.warn(`proxyscrape fetch failed (${protocol}): ${res.status}`); continue; }
-    const text = await res.text();
-    const lines = text.trim().split("\n").map((l) => l.trim()).filter((l) => /^\d+\.\d+\.\d+\.\d+:\d+$/.test(l));
-    for (const line of lines) candidates.push({ server: `${protocol}://${line}` });
-    console.log(`proxyscrape ${protocol}/${countryCode}: found ${lines.length} candidates`);
-  }
-  return candidates;
-}
-
-async function findWorkingFreeProxy(countryCode) {
-  const candidates = await fetchProxyScrapeList(countryCode);
-  if (candidates.length === 0) throw new Error(`No free proxies found for ${countryCode}`);
-  const verified = [];
-  console.log(`Testing up to ${Math.min(candidates.length, 20)} proxies for ${countryCode}...`);
-  for (const candidate of candidates.slice(0, 20)) {
-    const browser = await chromium.launch();
-    try {
-      const ctx = await browser.newContext({ proxy: { server: candidate.server } });
-      const page = await ctx.newPage();
-      const res = await page.goto("https://ipinfo.io/json", { timeout: 15000 });
-      const data = await res.json().catch(() => null);
-      await browser.close();
-      if (data?.country === countryCode) {
-        const ipLabel = `${data.ip}${data.city ? ` (${data.city}, ${data.country})` : ""}`;
-        console.log(`Verified proxy: ${candidate.server} → ${ipLabel}`);
-        verified.push({ server: candidate.server, ipLabel });
-        if (verified.length >= 3) break;
-      } else {
-        console.log(`Proxy ${candidate.server}: country=${data?.country ?? "?"}, skipping`);
-      }
-    } catch (e) {
-      console.log(`Proxy ${candidate.server} failed: ${e.message}`);
-      await browser.close().catch(() => {});
-    }
-  }
-  if (verified.length === 0) throw new Error(`No working ${countryCode} proxy found after trying up to 20 candidates`);
-  return verified;
-}
-
-async function fetchProxyByCountry(countryCode) {
-  const res = await fetch(
-    "https://proxy.webshare.io/api/v2/proxy/list/?mode=direct&page_size=100",
-    { headers: { Authorization: `Token ${process.env.WEBSHARE_API_KEY}` } }
-  );
-  if (!res.ok) throw new Error(`Webshare API failed: ${res.status}`);
-  const json = await res.json();
-  const p = json.results?.find((r) => r.country_code === countryCode && r.valid);
-  if (!p) throw new Error(`No ${countryCode} proxy available`);
-  const ipLabel = `${p.proxy_address} (${p.city_name}, ${p.country_code})`;
-  console.log(`Using ${countryCode} proxy: ${ipLabel}`);
-  return { server: `http://${p.proxy_address}:${p.port}`, username: p.username, password: p.password, ipLabel };
-}
-
-async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null) {
+async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null, options = {}) {
   const browser = await chromium.launch();
   const context = await browser.newContext({
     viewport: { width: 1920, height: 1080 },
@@ -111,7 +54,7 @@ async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null) {
       }, delay);
     });
   });
-  await page.waitForTimeout(3000);
+  await page.waitForTimeout(options.waitAfterScroll ?? 3000);
   await page.evaluate(() => window.scrollTo(0, 0));
 
   const ts = Date.now();
@@ -159,20 +102,19 @@ async function captureForCountry(targetUrl, country) {
   if (country === "default") {
     return takeUrlScreenshot(targetUrl, null, slug);
   }
-  if (country === "gb" || country === "jp") {
-    const p = await fetchProxyByCountry(country.toUpperCase());
-    return takeUrlScreenshot(targetUrl, p, slug, p.ipLabel);
-  }
-  if (country === "cn") {
-    const proxies = await findWorkingFreeProxy("CN");
-    for (const proxy of proxies) {
-      console.log(`Trying ${proxy.server} for CN...`);
-      try { return await takeUrlScreenshot(targetUrl, proxy, slug, proxy.ipLabel); }
-      catch (e) { console.log(`CN failed with ${proxy.server}: ${e.message}`); }
+  const cc = country.toUpperCase();
+  const isCn = country === "cn";
+  const proxies = await getBrowserProxies(cc);
+  for (const proxy of proxies) {
+    console.log(`Trying ${proxy.server} for ${cc}...`);
+    try {
+      return await takeUrlScreenshot(targetUrl, proxy, slug, proxy.ipLabel,
+        isCn ? { waitAfterScroll: 20000 } : {});
+    } catch (e) {
+      console.log(`${cc} failed with ${proxy.server}: ${e.message}`);
     }
-    throw new Error("All verified CN proxies failed");
   }
-  throw new Error(`Unknown country: ${country}`);
+  throw new Error(`All verified ${cc} proxies failed`);
 }
 
 async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, label, targetUrl, unixTs, button) {
