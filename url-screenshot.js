@@ -58,8 +58,8 @@ async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null, op
   await page.evaluate(() => window.scrollTo(0, 0));
 
   const ts = Date.now();
-  const screenshotPath = path.join(__dirname, `url_screenshot_${slug}_${ts}.png`);
-  await page.screenshot({ path: screenshotPath, fullPage: true });
+  const screenshotPath = path.join(__dirname, `url_screenshot_${slug}_${ts}.jpg`);
+  await page.screenshot({ path: screenshotPath, fullPage: true, type: "jpeg", quality: 80 });
 
   const htmlContent = await page.content();
   const htmlPath = path.join(__dirname, `url_screenshot_${slug}_${ts}.html`);
@@ -120,7 +120,7 @@ async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, 
     ? `${label} · <t:${unixTs}:F>\n<${targetUrl}>`
     : `${label} · <t:${unixTs}:F>`;
   const formData = new FormData();
-  formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/png" }), "screenshot.png");
+  formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/jpeg" }), "screenshot.jpg");
   formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
   formData.append("payload_json", JSON.stringify({
     content,
@@ -132,7 +132,9 @@ async function postUrlScreenshot(channelId, botToken, screenshotPath, htmlPath, 
     body: formData,
   });
   if (!res.ok) {
-    console.error(`Post failed for ${channelId}: ${res.status} ${await res.text()}`);
+    const text = await res.text();
+    console.error(`Post failed for ${channelId}: ${res.status} ${text}`);
+    throw new Error(`Post failed for ${channelId}: ${res.status} ${text}`);
   }
 }
 
