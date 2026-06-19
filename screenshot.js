@@ -84,21 +84,17 @@ async function fetchSteamFollowers(appid, proxies = [], attempt = 0) {
 
 async function fetchReleaseDates(appIds) {
   const map = new Map();
-  if (appIds.length === 0) { console.log("[release_date] no appIds"); return map; }
-  console.log(`[release_date] fetching for ${appIds.length} apps: ${appIds.join(",")}`);
-  for (const appId of appIds) {
+  await Promise.all(appIds.map(async (appId) => {
     try {
       const res = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appId}&filters=release_date`);
-      console.log(`[release_date] ${appId}: HTTP ${res.status}`);
-      if (!res.ok) continue;
+      if (!res.ok) return;
       const json = await res.json();
       const dateStr = json[appId]?.data?.release_date?.date ?? null;
-      console.log(`[release_date] ${appId}: "${dateStr}"`);
-      map.set(appId, dateStr);
-    } catch (e) {
-      console.error(`[release_date] ${appId} failed: ${e.message}`);
+      if (dateStr) map.set(appId, dateStr);
+    } catch {
+      // ignore
     }
-  }
+  }));
   return map;
 }
 
