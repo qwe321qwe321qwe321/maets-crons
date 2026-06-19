@@ -1,7 +1,8 @@
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
-const { getBrowserProxies } = require("./proxy-lib");
+const { ProxyAgent, fetch: proxyFetch } = require("undici");
+const { getBrowserProxies, getHttpProxies } = require("./proxy-lib");
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/d1/database/${process.env.CF_D1_DATABASE_ID}/query`;
 
@@ -19,6 +20,93 @@ async function d1(sql, params = []) {
   return json.result[0].results;
 }
 
+
+async function fetchRankMap(url) {
+  try {
+    const res = await fetch(url);
+    if (!res.ok) return new Map();
+    const text = await res.text();
+    const map = new Map();
+    for (const line of text.split("\n").slice(1)) {
+      const [rank, appid] = line.trim().split(",");
+      if (rank && appid) map.set(appid.trim(), parseInt(rank, 10));
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function fmt(n) {
+  return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+}
+
+function generateSessionId() {
+  const bytes = new Uint8Array(12);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+
+async function fetchSteamFollowers(appid, proxies = [], attempt = 0) {
+  const sessionid = generateSessionId();
+  const url = `https://steamcommunity.com/search/SearchCommunityAjax?text=${appid}&filter=groups&sessionid=${sessionid}&steamid_user=false`;
+  const headers = {
+    Cookie: `sessionid=${sessionid}`,
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    Referer: "https://steamcommunity.com/search/groups",
+  };
+
+  let res;
+  if (attempt > 0 && proxies.length > 0) {
+    const proxyUrl = proxies[(attempt - 1) % proxies.length];
+    console.log(`[followers][${appid}] attempt ${attempt} via proxy ${proxyUrl.split("@")[1] ?? proxyUrl}`);
+    res = await proxyFetch(url, { headers, dispatcher: new ProxyAgent(proxyUrl) });
+  } else {
+    res = await fetch(url, { headers });
+  }
+
+  if (res.status === 429) {
+    if (proxies.length > 0 && attempt < proxies.length) {
+      console.warn(`[followers][${appid}] 429, rotating proxy (attempt ${attempt + 1})`);
+      return fetchSteamFollowers(appid, proxies, attempt + 1);
+    }
+    console.warn(`[followers][${appid}] 429, giving up`);
+    return null;
+  }
+  if (!res.ok) { console.error(`[followers][${appid}] HTTP ${res.status}`); return null; }
+  const json = await res.json();
+  if (json.success !== 1 || !json.html) return null;
+  if (!json.html.includes(`/app/${appid}`)) return null;
+  const match = json.html.match(/<span[^>]*>([\d,]+)<\/span>\s*members in this group/);
+  if (!match) return null;
+  return parseInt(match[1].replace(/,/g, ""), 10);
+}
+
+async function buildEnrichments(results) {
+  const [topSellerRanks, wishlistRanks] = await Promise.all([
+    fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/top_seller_rank.csv"),
+    fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/wishlist_rank.csv"),
+  ]);
+
+  const upcomingAppIds = [...new Set(
+    results.flatMap((r) => (r?.tabData?.popularUpcoming ?? []).map((i) => i.appId))
+  )];
+
+  const followerMap = new Map();
+  if (upcomingAppIds.length > 0) {
+    const httpProxies = await getHttpProxies({ webshareApiKey: process.env.WEBSHARE_API_KEY }).catch(() => []);
+    let first = true;
+    for (const appId of upcomingAppIds) {
+      if (!first) await new Promise((r) => setTimeout(r, 3000));
+      first = false;
+      const count = await fetchSteamFollowers(appId, httpProxies);
+      followerMap.set(appId, count);
+      console.log(`[followers] ${appId}: ${count}`);
+    }
+  }
+
+  return { topSellerRanks, wishlistRanks, followerMap };
+}
 
 async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null, unixTs, pageLoadOptions = {}) {
   const browser = await chromium.launch();
@@ -121,8 +209,13 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
             .filter((t) => t.length > 0 && !/^\d+$/.test(t) && !t.includes("%"));
           name = textLines[0] || "";
         }
+        let discount = null;
+        if (config.key === "specials") {
+          const discountElem = item.querySelector(".discount_pct");
+          if (discountElem) discount = (discountElem.innerText || discountElem.textContent || "").trim();
+        }
         if (appId && name && !result[config.key].some((t) => t.appId === appId)) {
-          result[config.key].push({ appId, name });
+          result[config.key].push(discount ? { appId, name, discount } : { appId, name });
         }
       });
     });
@@ -163,7 +256,8 @@ const RETRY_CN_BUTTON = {
   components: [{ type: 2, style: 4, custom_id: "retry_cn", emoji: { name: "🔁" }, label: "再試一次" }],
 };
 
-async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton) {
+async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton, enrichments = null) {
+  const { topSellerRanks, wishlistRanks, followerMap } = enrichments ?? {};
   const tabLabels = [
     { key: "popularNewReleases", label: "Popular New Releases" },
     { key: "topSellers", label: "Top Sellers" },
@@ -178,7 +272,28 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
     if (items.length === 0) {
       lines.push("  (no data)");
     } else {
-      items.forEach((item, i) => lines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})`));
+      items.forEach((item, i) => {
+        let suffix = "";
+        if (enrichments) {
+          if (key === "popularNewReleases" || key === "topSellers") {
+            const rank = topSellerRanks?.get(item.appId);
+            if (rank != null) {
+              const emoji = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank <= 10 ? "🔥" : "📊";
+              suffix = ` ${emoji} #${rank}`;
+            }
+          } else if (key === "popularUpcoming") {
+            const followers = followerMap?.get(item.appId);
+            const wRank = wishlistRanks?.get(item.appId);
+            const parts = [];
+            if (followers != null) parts.push(`👥 ${fmt(followers)}`);
+            if (wRank != null) parts.push(`🎯 #${wRank}`);
+            if (parts.length > 0) suffix = " | " + parts.join(" | ");
+          } else if (key === "specials" && item.discount) {
+            suffix = ` ${item.discount}`;
+          }
+        }
+        lines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})${suffix}`);
+      });
     }
     lines.push("");
   }
@@ -248,10 +363,11 @@ async function run() {
     } catch (e) {
       cnError = e;
     }
+    const cnEnrichments = cnResult ? await buildEnrichments([cnResult]) : null;
     for (const channelId of channelIds) {
       if (cnResult) {
         await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData,
-          `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true);
+          `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true, cnEnrichments);
       } else {
         await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
           method: "POST",
@@ -289,10 +405,11 @@ async function run() {
     } catch (e) {
       error = e;
     }
+    const enrichments = result ? await buildEnrichments([result]) : null;
     for (const channelId of channelIds) {
       if (result) {
         await postToChannel(channelId, botToken, result.screenshotPath, result.htmlPath, result.tabData,
-          `${label} · \`${result.ipLabel}\``, unixTs, isoDate, false);
+          `${label} · \`${result.ipLabel}\``, unixTs, isoDate, false, enrichments);
       } else {
         await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
           method: "POST",
@@ -349,10 +466,12 @@ async function run() {
   if (jpError) console.error(`JP failed: ${jpError.message}`);
   if (cnError) console.error(`CN failed: ${cnError.message}`);
 
+  const enrichments = await buildEnrichments([defaultResult, gbResult, jpResult, cnResult]);
+
   for (const channelId of channelIds) {
-    await postToChannel(channelId, botToken, defaultResult.screenshotPath, defaultResult.htmlPath, defaultResult.tabData, `🌐 Steam homepage · Default · \`${defaultResult.ipLabel}\``, unixTs, isoDate, false);
+    await postToChannel(channelId, botToken, defaultResult.screenshotPath, defaultResult.htmlPath, defaultResult.tabData, `🌐 Steam homepage · Default · \`${defaultResult.ipLabel}\``, unixTs, isoDate, false, enrichments);
     if (gbResult) {
-      await postToChannel(channelId, botToken, gbResult.screenshotPath, gbResult.htmlPath, gbResult.tabData, `🇬🇧 Steam homepage · UK · \`${gbResult.ipLabel}\``, unixTs, isoDate, false);
+      await postToChannel(channelId, botToken, gbResult.screenshotPath, gbResult.htmlPath, gbResult.tabData, `🇬🇧 Steam homepage · UK · \`${gbResult.ipLabel}\``, unixTs, isoDate, false, enrichments);
     } else {
       await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST",
@@ -361,7 +480,7 @@ async function run() {
       });
     }
     if (jpResult) {
-      await postToChannel(channelId, botToken, jpResult.screenshotPath, jpResult.htmlPath, jpResult.tabData, `🇯🇵 Steam homepage · Japan · \`${jpResult.ipLabel}\``, unixTs, isoDate, false);
+      await postToChannel(channelId, botToken, jpResult.screenshotPath, jpResult.htmlPath, jpResult.tabData, `🇯🇵 Steam homepage · Japan · \`${jpResult.ipLabel}\``, unixTs, isoDate, false, enrichments);
     } else {
       await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST",
@@ -370,7 +489,7 @@ async function run() {
       });
     }
     if (cnResult) {
-      await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData, `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true);
+      await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData, `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true, enrichments);
     } else {
       await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
         method: "POST",
