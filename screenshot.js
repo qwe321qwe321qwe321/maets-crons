@@ -265,12 +265,12 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
     { key: "specials", label: "Specials" },
     { key: "trendingFree", label: "Trending Free" },
   ];
-  const lines = [];
+  const sections = [];
   for (const { key, label: tabLabel } of tabLabels) {
-    lines.push(tabLabel);
+    const sectionLines = [tabLabel];
     const items = tabData[key];
     if (items.length === 0) {
-      lines.push("  (no data)");
+      sectionLines.push("  (no data)");
     } else {
       items.forEach((item, i) => {
         let suffix = "";
@@ -292,12 +292,25 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
             suffix = ` ${item.discount}`;
           }
         }
-        lines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})${suffix}`);
+        sectionLines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})${suffix}`);
       });
     }
-    lines.push("");
+    sections.push(sectionLines.join("\n"));
   }
-  const codeBlock = "```\n" + lines.join("\n").trimEnd() + "\n```";
+
+  // Split into multiple code blocks if content exceeds Discord's 2000-char limit
+  const codeBlocks = [];
+  let current = "";
+  for (const section of sections) {
+    const candidate = current ? current + "\n\n" + section : section;
+    if (current && "```\n".length + candidate.length + "\n```".length > 1950) {
+      codeBlocks.push("```\n" + current.trimEnd() + "\n```");
+      current = section;
+    } else {
+      current = candidate;
+    }
+  }
+  if (current) codeBlocks.push("```\n" + current.trimEnd() + "\n```");
 
   const formData = new FormData();
   formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/png" }), "steam_homepage.png");
@@ -314,13 +327,16 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
     return;
   }
 
-  const tabRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ content: codeBlock, flags: 4, ...(showButton ? { components: [CAPTURE_NOW_BUTTON] } : {}) }),
-  });
-  if (!tabRes.ok) {
-    console.error(`Tab post failed for ${channelId}: ${tabRes.status} ${await tabRes.text()}`);
+  for (let i = 0; i < codeBlocks.length; i++) {
+    const isLast = i === codeBlocks.length - 1;
+    const tabRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+      method: "POST",
+      headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ content: codeBlocks[i], flags: 4, ...(isLast && showButton ? { components: [CAPTURE_NOW_BUTTON] } : {}) }),
+    });
+    if (!tabRes.ok) {
+      console.error(`Tab post failed for ${channelId} (block ${i + 1}/${codeBlocks.length}): ${tabRes.status} ${await tabRes.text()}`);
+    }
   }
 }
 
