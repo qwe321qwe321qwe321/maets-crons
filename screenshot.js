@@ -267,10 +267,10 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
   ];
   const sections = [];
   for (const { key, label: tabLabel } of tabLabels) {
-    const sectionLines = [tabLabel];
+    const itemLines = [];
     const items = tabData[key];
     if (items.length === 0) {
-      sectionLines.push("  (no data)");
+      itemLines.push("-# (no data)");
     } else {
       items.forEach((item, i) => {
         let suffix = "";
@@ -292,25 +292,26 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
             suffix = ` ${item.discount}`;
           }
         }
-        sectionLines.push(`  ${String(i + 1).padStart(2)}. ${item.name} (${item.appId})${suffix}`);
+        itemLines.push(`${i + 1}. ${item.name} \`${item.appId}\`${suffix}`);
       });
     }
-    sections.push(sectionLines.join("\n"));
+    sections.push(`**${tabLabel}**\n${itemLines.join("\n")}`);
   }
 
-  // Split into multiple code blocks if content exceeds Discord's 2000-char limit
-  const codeBlocks = [];
+  // Split into multiple messages if content exceeds Discord's 2000-char limit
+  const messages = [];
   let current = "";
   for (const section of sections) {
     const candidate = current ? current + "\n\n" + section : section;
-    if (current && "```\n".length + candidate.length + "\n```".length > 1950) {
-      codeBlocks.push("```\n" + current.trimEnd() + "\n```");
+    if (current && candidate.length > 1900) {
+      messages.push(current);
       current = section;
     } else {
       current = candidate;
     }
   }
-  if (current) codeBlocks.push("```\n" + current.trimEnd() + "\n```");
+  if (current) messages.push(current);
+  const codeBlocks = messages;
 
   const formData = new FormData();
   formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/png" }), "steam_homepage.png");
