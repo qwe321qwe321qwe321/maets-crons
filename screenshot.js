@@ -275,7 +275,7 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
       items.forEach((item, i) => {
         let suffix = "";
         if (enrichments) {
-          if (key === "popularNewReleases" || key === "topSellers") {
+          if (key === "popularNewReleases") {
             const rank = topSellerRanks?.get(item.appId);
             if (rank != null) {
               const emoji = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank <= 10 ? "🔥" : "📊";
