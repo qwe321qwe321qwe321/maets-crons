@@ -289,7 +289,7 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
             if (wRank != null) parts.push(`🎯 #${wRank}`);
             if (parts.length > 0) suffix = " | " + parts.join(" | ");
           } else if (key === "specials" && item.discount) {
-            suffix = ` ${item.discount}`;
+            suffix = ` 🏷️ ${item.discount}`;
           }
         }
         itemLines.push(`${i + 1}. ${item.name} \`${item.appId}\`${suffix}`);
