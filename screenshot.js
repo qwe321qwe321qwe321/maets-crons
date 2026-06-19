@@ -82,10 +82,45 @@ async function fetchSteamFollowers(appid, proxies = [], attempt = 0) {
   return parseInt(match[1].replace(/,/g, ""), 10);
 }
 
+async function fetchReleaseDates(appIds) {
+  const map = new Map();
+  if (appIds.length === 0) return map;
+  try {
+    const res = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appIds.join(",")}&filters=release_date`);
+    if (!res.ok) return map;
+    const json = await res.json();
+    for (const appId of appIds) {
+      const dateStr = json[appId]?.data?.release_date?.date ?? null;
+      map.set(appId, dateStr);
+    }
+  } catch (e) {
+    console.error(`[release_date] fetch failed: ${e.message}`);
+  }
+  return map;
+}
+
+function relativeTime(dateStr) {
+  if (!dateStr) return null;
+  const date = new Date(dateStr);
+  if (isNaN(date.getTime())) return null;
+  const diffMs = Date.now() - date.getTime();
+  const diffHours = diffMs / (1000 * 60 * 60);
+  const diffDays = diffHours / 24;
+  if (diffHours < 1) return "just now";
+  if (diffHours < 24) return `${Math.floor(diffHours)}h ago`;
+  if (diffDays < 30) return `${Math.floor(diffDays)}d ago`;
+  return `${Math.floor(diffDays / 30)}mo ago`;
+}
+
 async function buildEnrichments(results) {
-  const [topSellerRanks, wishlistRanks] = await Promise.all([
+  const newReleasesAppIds = [...new Set(
+    results.flatMap((r) => (r?.tabData?.popularNewReleases ?? []).map((i) => i.appId))
+  )];
+
+  const [topSellerRanks, wishlistRanks, releaseDateMap] = await Promise.all([
     fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/top_seller_rank.csv"),
     fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/wishlist_rank.csv"),
+    fetchReleaseDates(newReleasesAppIds),
   ]);
 
   const upcomingAppIds = [...new Set(
@@ -105,7 +140,7 @@ async function buildEnrichments(results) {
     }
   }
 
-  return { topSellerRanks, wishlistRanks, followerMap };
+  return { topSellerRanks, wishlistRanks, followerMap, releaseDateMap };
 }
 
 async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = null, unixTs, pageLoadOptions = {}) {
@@ -257,7 +292,7 @@ const RETRY_CN_BUTTON = {
 };
 
 async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton, enrichments = null) {
-  const { topSellerRanks, wishlistRanks, followerMap } = enrichments ?? {};
+  const { topSellerRanks, wishlistRanks, followerMap, releaseDateMap } = enrichments ?? {};
   const tabLabels = [
     { key: "popularNewReleases", label: "Popular New Releases" },
     { key: "topSellers", label: "Top Sellers" },
@@ -280,6 +315,11 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
             if (rank != null) {
               const emoji = rank === 1 ? "🥇" : rank === 2 ? "🥈" : rank === 3 ? "🥉" : rank <= 10 ? "🔥" : "📊";
               suffix = ` ${emoji} #${rank}`;
+            }
+            const dateStr = releaseDateMap?.get(item.appId);
+            if (dateStr) {
+              const rel = relativeTime(dateStr);
+              suffix += ` | 📅 ${dateStr}${rel ? ` (${rel})` : ""}`;
             }
           } else if (key === "popularUpcoming") {
             const followers = followerMap?.get(item.appId);
