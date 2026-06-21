@@ -105,6 +105,12 @@ function relativeTime(dateStr) {
   const diffMs = Date.now() - date.getTime();
   const diffHours = diffMs / (1000 * 60 * 60);
   const diffDays = diffHours / 24;
+  if (diffMs < 0) {
+    const futureDays = Math.ceil(-diffDays);
+    if (futureDays <= 1) return "tomorrow";
+    if (futureDays < 30) return `in ${futureDays}d`;
+    return `in ${Math.floor(futureDays / 30)}mo`;
+  }
   if (diffHours < 1) return "just now";
   if (diffHours < 24) return `${Math.floor(diffHours)}h ago`;
   if (diffDays < 30) return `${Math.floor(diffDays)}d ago`;
@@ -116,15 +122,15 @@ async function buildEnrichments(results) {
     results.flatMap((r) => (r?.tabData?.popularNewReleases ?? []).map((i) => i.appId))
   )];
 
-  const [topSellerRanks, wishlistRanks, releaseDateMap] = await Promise.all([
-    fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/top_seller_rank.csv"),
-    fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/wishlist_rank.csv"),
-    fetchReleaseDates(newReleasesAppIds),
-  ]);
-
   const upcomingAppIds = [...new Set(
     results.flatMap((r) => (r?.tabData?.popularUpcoming ?? []).map((i) => i.appId))
   )];
+
+  const [topSellerRanks, wishlistRanks, releaseDateMap] = await Promise.all([
+    fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/top_seller_rank.csv"),
+    fetchRankMap("https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/main/wishlist_rank.csv"),
+    fetchReleaseDates([...new Set([...newReleasesAppIds, ...upcomingAppIds])]),
+  ]);
 
   const followerMap = new Map();
   if (upcomingAppIds.length > 0) {
@@ -323,9 +329,14 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
           } else if (key === "popularUpcoming") {
             const followers = followerMap?.get(item.appId);
             const wRank = wishlistRanks?.get(item.appId);
+            const dateStr = releaseDateMap?.get(item.appId);
             const parts = [];
             if (followers != null) parts.push(`👥 ${fmt(followers)}`);
             if (wRank != null) parts.push(`🎯 #${wRank}`);
+            if (dateStr) {
+              const rel = relativeTime(dateStr);
+              parts.push(`📅 ${dateStr}${rel ? ` (${rel})` : ""}`);
+            }
             if (parts.length > 0) suffix = " | " + parts.join(" | ");
           } else if (key === "specials" && item.discount) {
             suffix = ` 🏷️ ${item.discount}`;
