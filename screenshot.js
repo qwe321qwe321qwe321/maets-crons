@@ -342,7 +342,7 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
             suffix = ` 🏷️ ${item.discount}`;
           }
         }
-        itemLines.push(`${i + 1}. ${item.name} \`${item.appId}\`${suffix}`);
+        itemLines.push(`${i + 1}. [${item.name}](https://store.steampowered.com/app/${item.appId}/) \`${item.appId}\`${suffix}`);
       });
     }
     sections.push(`**${tabLabel}**\n${itemLines.join("\n")}`);
