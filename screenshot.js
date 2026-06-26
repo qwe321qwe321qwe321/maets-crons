@@ -368,11 +368,26 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
   formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
   formData.append("payload_json", JSON.stringify({ content: `${label} · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 }));
 
-  const imgRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-    method: "POST",
-    headers: { Authorization: `Bot ${botToken}` },
-    body: formData,
-  });
+  async function discordPost(url, options, label) {
+    for (let attempt = 0; attempt < 5; attempt++) {
+      const res = await fetch(url, options);
+      if (res.status === 429) {
+        const json = await res.json().catch(() => ({}));
+        const delay = Math.ceil((json.retry_after ?? 1) * 1000) + 100;
+        console.warn(`${label} rate limited, retrying in ${delay}ms...`);
+        await new Promise((r) => setTimeout(r, delay));
+        continue;
+      }
+      return res;
+    }
+    throw new Error(`${label} still rate limited after 5 attempts`);
+  }
+
+  const imgRes = await discordPost(
+    `https://discord.com/api/v10/channels/${channelId}/messages`,
+    { method: "POST", headers: { Authorization: `Bot ${botToken}` }, body: formData },
+    `Image post for ${channelId}`
+  );
   if (!imgRes.ok) {
     const text = await imgRes.text();
     console.error(`Image post failed for ${channelId}: ${imgRes.status} ${text}`);
@@ -381,11 +396,15 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
 
   for (let i = 0; i < codeBlocks.length; i++) {
     const isLast = i === codeBlocks.length - 1;
-    const tabRes = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-      method: "POST",
-      headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ content: codeBlocks[i], flags: 4, ...(isLast && showButton ? { components: [CAPTURE_NOW_BUTTON] } : {}) }),
-    });
+    const tabRes = await discordPost(
+      `https://discord.com/api/v10/channels/${channelId}/messages`,
+      {
+        method: "POST",
+        headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ content: codeBlocks[i], flags: 4, ...(isLast && showButton ? { components: [CAPTURE_NOW_BUTTON] } : {}) }),
+      },
+      `Tab post for ${channelId} (block ${i + 1}/${codeBlocks.length})`
+    );
     if (!tabRes.ok) {
       console.error(`Tab post failed for ${channelId} (block ${i + 1}/${codeBlocks.length}): ${tabRes.status} ${await tabRes.text()}`);
     }
