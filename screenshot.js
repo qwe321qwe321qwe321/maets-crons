@@ -264,8 +264,8 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
 
   await page.evaluate(() => window.scrollTo(0, 0));
 
-  const screenshotPath = path.join(__dirname, `steam_homepage_${slug}.png`);
-  await page.screenshot({ path: screenshotPath, fullPage: true });
+  const screenshotPath = path.join(__dirname, `steam_homepage_${slug}.jpg`);
+  await page.screenshot({ path: screenshotPath, fullPage: true, type: "jpeg", quality: 80 });
 
   const htmlContent = await page.content();
   const htmlPath = path.join(__dirname, `${unixTs}_${slug}.html`);
@@ -364,7 +364,7 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
   const codeBlocks = messages;
 
   const formData = new FormData();
-  formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/png" }), "steam_homepage.png");
+  formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/jpeg" }), "steam_homepage.jpg");
   formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
   formData.append("payload_json", JSON.stringify({ content: `${label} · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 }));
 
@@ -374,8 +374,9 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
     body: formData,
   });
   if (!imgRes.ok) {
-    console.error(`Image post failed for ${channelId}: ${imgRes.status} ${await imgRes.text()}`);
-    return;
+    const text = await imgRes.text();
+    console.error(`Image post failed for ${channelId}: ${imgRes.status} ${text}`);
+    throw new Error(`Image post failed for ${channelId}: ${imgRes.status} ${text}`);
   }
 
   for (let i = 0; i < codeBlocks.length; i++) {
