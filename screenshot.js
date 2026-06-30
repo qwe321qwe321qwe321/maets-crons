@@ -349,19 +349,34 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
   }
 
   // Split into multiple messages if content exceeds Discord's 2000-char limit
-  const messages = [];
+  const MAX_LEN = 1900;
+  const codeBlocks = [];
   let current = "";
   for (const section of sections) {
-    const candidate = current ? current + "\n\n" + section : section;
-    if (current && candidate.length > 1900) {
-      messages.push(current);
-      current = section;
-    } else {
+    const sep = current ? "\n\n" : "";
+    const candidate = current + sep + section;
+    if (candidate.length <= MAX_LEN) {
       current = candidate;
+    } else {
+      if (current) { codeBlocks.push(current); current = ""; }
+      if (section.length <= MAX_LEN) {
+        current = section;
+      } else {
+        // Section itself too long — split line by line
+        for (const line of section.split("\n")) {
+          const lineSep = current ? "\n" : "";
+          const lineCandidate = current + lineSep + line;
+          if (current && lineCandidate.length > MAX_LEN) {
+            codeBlocks.push(current);
+            current = line;
+          } else {
+            current = lineCandidate;
+          }
+        }
+      }
     }
   }
-  if (current) messages.push(current);
-  const codeBlocks = messages;
+  if (current) codeBlocks.push(current);
 
   const formData = new FormData();
   formData.append("files[0]", new Blob([fs.readFileSync(screenshotPath)], { type: "image/jpeg" }), "steam_homepage.jpg");
@@ -406,7 +421,8 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
       `Tab post for ${channelId} (block ${i + 1}/${codeBlocks.length})`
     );
     if (!tabRes.ok) {
-      console.error(`Tab post failed for ${channelId} (block ${i + 1}/${codeBlocks.length}): ${tabRes.status} ${await tabRes.text()}`);
+      const text = await tabRes.text();
+      throw new Error(`Tab post failed for ${channelId} (block ${i + 1}/${codeBlocks.length}): ${tabRes.status} ${text}`);
     }
   }
 }
