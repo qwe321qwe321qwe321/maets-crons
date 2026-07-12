@@ -2,7 +2,7 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 const { ProxyAgent, fetch: proxyFetch } = require("undici");
-const { getBrowserProxies, getHttpProxies } = require("./proxy-lib");
+const { getBrowserProxies, getHttpProxies, blockHeavyResources } = require("./proxy-lib");
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/d1/database/${process.env.CF_D1_DATABASE_ID}/query`;
 
@@ -172,6 +172,7 @@ async function takeScreenshot(proxy, slug, cc, locale = "en-US", knownIpLabel = 
   console.log(`[${slug}] ${ipLabel}`);
 
   const page = await context.newPage();
+  if (proxy) await blockHeavyResources(page);
   const params = new URLSearchParams();
   if (cc) params.set("cc", cc);
   const localeToSteamLang = { "ja-JP": "japanese", "zh-CN": "schinese", "zh-TW": "tchinese" };

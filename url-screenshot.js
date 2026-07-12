@@ -1,7 +1,7 @@
 const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
-const { getBrowserProxies } = require("./proxy-lib");
+const { getBrowserProxies, blockHeavyResources } = require("./proxy-lib");
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/d1/database/${process.env.CF_D1_DATABASE_ID}/query`;
 
@@ -39,6 +39,7 @@ async function takeUrlScreenshot(targetUrl, proxy, slug, knownIpLabel = null, op
   console.log(`[${slug}] ${ipLabel} → ${targetUrl}`);
 
   const page = await context.newPage();
+  if (proxy) await blockHeavyResources(page);
   await page.goto(targetUrl, { waitUntil: "networkidle", timeout: 60000 });
 
   await page.evaluate(async () => {
@@ -103,7 +104,7 @@ async function captureForCountry(targetUrl, country) {
     return takeUrlScreenshot(targetUrl, null, slug);
   }
   const cc = country.toUpperCase();
-  const proxies = await getBrowserProxies(cc);
+  const proxies = await getBrowserProxies(cc, { webshareApiKey: process.env.WEBSHARE_API_KEY });
   for (const proxy of proxies) {
     console.log(`Trying ${proxy.server} for ${cc}...`);
     try {

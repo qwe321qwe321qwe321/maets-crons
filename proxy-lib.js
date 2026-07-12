@@ -148,4 +148,19 @@ async function getHttpProxies({ webshareApiKey = null, pageSize = 25 } = {}) {
   return _cachedHttpProxies;
 }
 
-module.exports = { getBrowserProxies, getHttpProxies };
+/**
+ * Block image/media/font requests on a Playwright page to save proxy bandwidth.
+ * Intended for proxied navigations where a visually perfect screenshot matters
+ * less than the HTML content and extracted data.
+ */
+async function blockHeavyResources(page) {
+  await page.route("**/*", (route) => {
+    const type = route.request().resourceType();
+    if (type === "image" || type === "media" || type === "font") {
+      return route.abort();
+    }
+    return route.continue();
+  });
+}
+
+module.exports = { getBrowserProxies, getHttpProxies, blockHeavyResources };
