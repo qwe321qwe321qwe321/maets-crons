@@ -453,7 +453,7 @@ async function run() {
     let cnResult = null;
     let cnError = null;
     try {
-      const cnProxies = await getBrowserProxies("CN");
+      const cnProxies = await getBrowserProxies("CN", { webshareApiKey: process.env.WEBSHARE_API_KEY });
       for (const proxy of cnProxies) {
         console.log(`Trying ${proxy.server} for CN screenshot...`);
         try {
@@ -495,7 +495,7 @@ async function run() {
     let result = null;
     let error = null;
     try {
-      const proxies = await getBrowserProxies(cc);
+      const proxies = await getBrowserProxies(cc, { webshareApiKey: process.env.WEBSHARE_API_KEY });
       for (const proxy of proxies) {
         console.log(`Trying ${proxy.server} for ${cc} screenshot...`);
         try {
@@ -541,7 +541,7 @@ async function run() {
   console.log("Taking all screenshots in parallel...");
 
   async function captureWithFreeProxy(cc, slug, locale, pageLoadOptions = {}) {
-    const proxies = await getBrowserProxies(cc);
+    const proxies = await getBrowserProxies(cc, { webshareApiKey: process.env.WEBSHARE_API_KEY });
     for (const proxy of proxies) {
       console.log(`Trying ${proxy.server} for ${cc} screenshot...`);
       try {
