@@ -297,6 +297,38 @@ const RETRY_CN_BUTTON = {
   components: [{ type: 2, style: 4, custom_id: "retry_cn", emoji: { name: "🔁" }, label: "再試一次" }],
 };
 
+async function discordPost(url, options, label) {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const res = await fetch(url, options);
+    if (res.status === 429) {
+      const json = await res.json().catch(() => ({}));
+      const delay = Math.ceil((json.retry_after ?? 1) * 1000) + 100;
+      console.warn(`${label} rate limited, retrying in ${delay}ms...`);
+      await new Promise((r) => setTimeout(r, delay));
+      continue;
+    }
+    return res;
+  }
+  throw new Error(`${label} still rate limited after 5 attempts`);
+}
+
+async function postFailureMessage(channelId, botToken, content, retryButton) {
+  const res = await discordPost(
+    `https://discord.com/api/v10/channels/${channelId}/messages`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ content, components: [retryButton] }),
+    },
+    `Failure message for ${channelId}`
+  );
+  if (!res.ok) {
+    const text = await res.text();
+    console.error(`Failure message post failed for ${channelId}: ${res.status} ${text}`);
+    throw new Error(`Failure message post failed for ${channelId}: ${res.status} ${text}`);
+  }
+}
+
 async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabData, label, unixTs, isoDate, showButton, enrichments = null) {
   const { topSellerRanks, wishlistRanks, followerMap, releaseDateMap } = enrichments ?? {};
   const tabLabels = [
@@ -384,21 +416,6 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
   formData.append("files[1]", new Blob([fs.readFileSync(htmlPath)], { type: "text/html" }), path.basename(htmlPath));
   formData.append("payload_json", JSON.stringify({ content: `${label} · ${isoDate}\n<t:${unixTs}:F>`, flags: 4 }));
 
-  async function discordPost(url, options, label) {
-    for (let attempt = 0; attempt < 5; attempt++) {
-      const res = await fetch(url, options);
-      if (res.status === 429) {
-        const json = await res.json().catch(() => ({}));
-        const delay = Math.ceil((json.retry_after ?? 1) * 1000) + 100;
-        console.warn(`${label} rate limited, retrying in ${delay}ms...`);
-        await new Promise((r) => setTimeout(r, delay));
-        continue;
-      }
-      return res;
-    }
-    throw new Error(`${label} still rate limited after 5 attempts`);
-  }
-
   const imgRes = await discordPost(
     `https://discord.com/api/v10/channels/${channelId}/messages`,
     { method: "POST", headers: { Authorization: `Bot ${botToken}` }, body: formData },
@@ -473,14 +490,7 @@ async function run() {
         await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData,
           `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true, cnEnrichments);
       } else {
-        await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-          method: "POST",
-          headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({
-            content: `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
-            components: [RETRY_CN_BUTTON],
-          }),
-        });
+        await postFailureMessage(channelId, botToken, `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``, RETRY_CN_BUTTON);
       }
     }
     if (cnResult) {
@@ -515,11 +525,7 @@ async function run() {
         await postToChannel(channelId, botToken, result.screenshotPath, result.htmlPath, result.tabData,
           `${label} · \`${result.ipLabel}\``, unixTs, isoDate, false, enrichments);
       } else {
-        await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-          method: "POST",
-          headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ content: `${label} · ⚠️ 截圖失敗: \`${error.message}\``, components: [retryButton] }),
-        });
+        await postFailureMessage(channelId, botToken, `${label} · ⚠️ 截圖失敗: \`${error.message}\``, retryButton);
       }
     }
     if (result) { fs.unlinkSync(result.screenshotPath); fs.unlinkSync(result.htmlPath); }
@@ -577,32 +583,17 @@ async function run() {
     if (gbResult) {
       await postToChannel(channelId, botToken, gbResult.screenshotPath, gbResult.htmlPath, gbResult.tabData, `🇬🇧 Steam homepage · UK · \`${gbResult.ipLabel}\``, unixTs, isoDate, false, enrichments);
     } else {
-      await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ content: `🇬🇧 Steam homepage · UK · ⚠️ 截圖失敗: \`${gbError.message}\``, components: [RETRY_GB_BUTTON] }),
-      });
+      await postFailureMessage(channelId, botToken, `🇬🇧 Steam homepage · UK · ⚠️ 截圖失敗: \`${gbError.message}\``, RETRY_GB_BUTTON);
     }
     if (jpResult) {
       await postToChannel(channelId, botToken, jpResult.screenshotPath, jpResult.htmlPath, jpResult.tabData, `🇯🇵 Steam homepage · Japan · \`${jpResult.ipLabel}\``, unixTs, isoDate, false, enrichments);
     } else {
-      await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ content: `🇯🇵 Steam homepage · Japan · ⚠️ 截圖失敗: \`${jpError.message}\``, components: [RETRY_JP_BUTTON] }),
-      });
+      await postFailureMessage(channelId, botToken, `🇯🇵 Steam homepage · Japan · ⚠️ 截圖失敗: \`${jpError.message}\``, RETRY_JP_BUTTON);
     }
     if (cnResult) {
       await postToChannel(channelId, botToken, cnResult.screenshotPath, cnResult.htmlPath, cnResult.tabData, `🇨🇳 Steam homepage · CN · \`${cnResult.ipLabel}\``, unixTs, isoDate, true, enrichments);
     } else {
-      await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
-        method: "POST",
-        headers: { Authorization: `Bot ${botToken}`, "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``,
-          components: [RETRY_CN_BUTTON],
-        }),
-      });
+      await postFailureMessage(channelId, botToken, `🇨🇳 Steam homepage · CN · ⚠️ 截圖失敗: \`${cnError.message}\``, RETRY_CN_BUTTON);
     }
   }
 
