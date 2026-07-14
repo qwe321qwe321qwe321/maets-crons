@@ -166,14 +166,18 @@ async function blockHeavyResources(page) {
 /**
  * Sanitize untrusted text (scraped DOM text, API names, etc.) for safe use as
  * the label of a Discord Markdown link `[label](url)`. Collapses embedded
- * newlines/whitespace (which otherwise break link parsing entirely) and
+ * newlines/whitespace (which otherwise break link parsing entirely),
  * backslash-escapes Markdown special characters (which otherwise corrupt
- * formatting for the rest of the message).
+ * formatting for the rest of the message), and strips emoji variation
+ * selectors (U+FE0E/U+FE0F) — Discord's client fails to parse the link at
+ * all when one sits directly against the closing `]` (e.g. game names
+ * ending in an emoji like "⛏️").
  */
 function sanitizeMdLinkText(text) {
   return text
     .replace(/\s+/g, " ")
     .trim()
+    .replace(/[︎️]/g, "")
     .replace(/[\\`*_~|[\]]/g, "\\$&");
 }
 
