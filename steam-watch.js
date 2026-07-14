@@ -5,7 +5,7 @@ const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
 const WEBSHARE_API_KEY = process.env.WEBSHARE_API_KEY;
 
 const { ProxyAgent, fetch: proxyFetch } = require('undici');
-const { getHttpProxies } = require('./proxy-lib');
+const { getHttpProxies, sanitizeMdLinkText } = require('./proxy-lib');
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${CF_D1_DATABASE_ID}/query`;
 
@@ -311,7 +311,7 @@ async function runDailyReport(filterChannelId = '') {
 			const d = dataMap.get(app.appid);
 			if (!d) continue;
 
-			const titleLine = `**[${app.app_name ?? app.appid}](https://store.steampowered.com/app/${app.appid}/)** \`${app.appid}\``;
+			const titleLine = `**[${sanitizeMdLinkText(app.app_name ?? app.appid)}](https://store.steampowered.com/app/${app.appid}/)** \`${app.appid}\``;
 
 			let statsLine;
 			if (d.comingSoon) {

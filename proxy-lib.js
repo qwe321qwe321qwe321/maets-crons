@@ -163,4 +163,18 @@ async function blockHeavyResources(page) {
   });
 }
 
-module.exports = { getBrowserProxies, getHttpProxies, blockHeavyResources };
+/**
+ * Sanitize untrusted text (scraped DOM text, API names, etc.) for safe use as
+ * the label of a Discord Markdown link `[label](url)`. Collapses embedded
+ * newlines/whitespace (which otherwise break link parsing entirely) and
+ * backslash-escapes Markdown special characters (which otherwise corrupt
+ * formatting for the rest of the message).
+ */
+function sanitizeMdLinkText(text) {
+  return text
+    .replace(/\s+/g, " ")
+    .trim()
+    .replace(/[\\`*_~|[\]]/g, "\\$&");
+}
+
+module.exports = { getBrowserProxies, getHttpProxies, blockHeavyResources, sanitizeMdLinkText };

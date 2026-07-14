@@ -2,7 +2,7 @@ const { chromium } = require("playwright");
 const fs = require("fs");
 const path = require("path");
 const { ProxyAgent, fetch: proxyFetch } = require("undici");
-const { getBrowserProxies, getHttpProxies, blockHeavyResources } = require("./proxy-lib");
+const { getBrowserProxies, getHttpProxies, blockHeavyResources, sanitizeMdLinkText } = require("./proxy-lib");
 
 const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/d1/database/${process.env.CF_D1_DATABASE_ID}/query`;
 
@@ -375,7 +375,7 @@ async function postToChannel(channelId, botToken, screenshotPath, htmlPath, tabD
             suffix = ` 🏷️ ${item.discount}`;
           }
         }
-        itemLines.push(`${i + 1}. [${item.name}](https://store.steampowered.com/app/${item.appId}/) \`${item.appId}\`${suffix}`);
+        itemLines.push(`${i + 1}. [${sanitizeMdLinkText(item.name)}](https://store.steampowered.com/app/${item.appId}/) \`${item.appId}\`${suffix}`);
       });
     }
     sections.push(`**${tabLabel}**\n${itemLines.join("\n")}`);
