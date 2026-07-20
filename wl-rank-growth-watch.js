@@ -1,0 +1,122 @@
+const CF_API_TOKEN = process.env.CF_API_TOKEN;
+const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
+const CF_D1_DATABASE_ID = process.env.CF_D1_DATABASE_ID;
+const DISCORD_TOKEN = process.env.DISCORD_TOKEN;
+
+const D1_URL = `https://api.cloudflare.com/client/v4/accounts/${CF_ACCOUNT_ID}/d1/database/${CF_D1_DATABASE_ID}/query`;
+
+async function d1(sql, params = []) {
+	const res = await fetch(D1_URL, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bearer ${CF_API_TOKEN}`,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ sql, params }),
+	});
+	const json = await res.json();
+	if (!json.success) throw new Error(`D1 error: ${JSON.stringify(json.errors)}`);
+	return json.result[0].results;
+}
+
+async function fetchTopGrowth(limit = 10) {
+	const res = await fetch('https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/refs/heads/main/wishlist_rank_growth.csv');
+	if (!res.ok) throw new Error(`Failed to fetch wishlist_rank_growth.csv: ${res.status}`);
+	const text = await res.text();
+	const rows = [];
+	for (const line of text.split('\n').slice(1)) {
+		const [appid, rank, prevRank, rankChange] = line.trim().split(',');
+		if (!appid || !rank || !rankChange) continue;
+		rows.push({
+			appid,
+			rank: parseInt(rank, 10),
+			prevRank: prevRank === 'N/A' ? null : parseInt(prevRank, 10),
+			rankChange: parseInt(rankChange, 10),
+		});
+	}
+	return rows.slice(0, limit);
+}
+
+async function fetchSteamAppName(appid) {
+	const res = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appid}`);
+	if (!res.ok) return null;
+	const json = await res.json();
+	return json[appid]?.success ? (json[appid].data?.name ?? null) : null;
+}
+
+function fmt(n) {
+	return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+async function sendMessage(channelId, content) {
+	const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
+		method: 'POST',
+		headers: {
+			'Authorization': `Bot ${DISCORD_TOKEN}`,
+			'Content-Type': 'application/json',
+		},
+		body: JSON.stringify({ content, flags: 4 }),
+	});
+	if (!res.ok) {
+		const text = await res.text();
+		console.error(`Message post failed for ${channelId}: ${res.status} ${text}`);
+	}
+}
+
+async function main() {
+	const filterChannelId = process.env.FILTER_CHANNEL_ID ?? '';
+
+	const channelIds = filterChannelId
+		? [filterChannelId]
+		: (await d1('SELECT channel_id FROM wl_rank_growth_channels')).map(r => r.channel_id);
+	if (channelIds.length === 0) {
+		console.log('No channels subscribed, skipping.');
+		return;
+	}
+
+	const topGrowth = await fetchTopGrowth(10);
+	if (topGrowth.length === 0) {
+		console.log('No growth data available, skipping.');
+		return;
+	}
+
+	const names = new Map();
+	for (const { appid } of topGrowth) {
+		names.set(appid, await fetchSteamAppName(appid));
+	}
+
+	const unixTs = Math.floor(Date.now() / 1000);
+	const isoDate = new Date().toISOString();
+	const header = `**📈 Steam WL Growth Rank Watch · ${isoDate}**\n<t:${unixTs}:F>`;
+
+	const lines = topGrowth.map(({ appid, rank, prevRank, rankChange }, i) => {
+		const name = names.get(appid) ?? appid;
+		const titleLine = `**${i + 1}. [${name}](https://store.steampowered.com/app/${appid}/)** \`${appid}\``;
+		const rankStr = prevRank != null
+			? `#${fmt(prevRank)} → #${fmt(rank)} (▲${fmt(rankChange)})`
+			: `New entry → #${fmt(rank)} (+${fmt(rankChange)})`;
+		return `${titleLine}\n🎯 ${rankStr}`;
+	});
+
+	const messages = [];
+	let current = header;
+	for (const line of lines) {
+		const candidate = `${current}\n\n${line}`;
+		if (candidate.length > 1900) {
+			messages.push(current);
+			current = line;
+		} else {
+			current = candidate;
+		}
+	}
+	messages.push(current);
+
+	for (const channelId of channelIds) {
+		for (const message of messages) {
+			await sendMessage(channelId, message);
+		}
+	}
+	console.log('Done.');
+}
+
+main().catch(err => { console.error(err); process.exit(1); });
