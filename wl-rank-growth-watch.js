@@ -45,15 +45,17 @@ async function fetchSteamAppName(appid) {
 }
 
 async function fetchSteamAppTags(appid, limit = 5) {
-	const res = await fetch(`https://steamspy.com/api.php?request=appdetails&appid=${appid}`);
+	const res = await fetch(`https://store.steampowered.com/app/${appid}/`, {
+		headers: { 'Cookie': 'birthtime=0; mature_content=1' },
+	});
 	if (!res.ok) return [];
-	const json = await res.json();
-	const tags = json?.tags;
-	if (!tags || Array.isArray(tags)) return [];
-	return Object.entries(tags)
-		.sort((a, b) => b[1] - a[1])
-		.slice(0, limit)
-		.map(([tag]) => tag);
+	const html = await res.text();
+	const tags = [];
+	for (const m of html.matchAll(/class="app_tag"[^>]*>\s*([^<]+?)\s*<\/a>/g)) {
+		tags.push(m[1]);
+		if (tags.length >= limit) break;
+	}
+	return tags;
 }
 
 function fmt(n) {
