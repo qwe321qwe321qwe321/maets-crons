@@ -120,10 +120,18 @@ async function main() {
 	}
 
 	const TOP_RANK_LIMIT = 3000;
+	const CATCH_RANK_LIMIT = 1500;
+	const CATCH_MIN_GROWTH = 100;
+
 	const topGrowth = allGrowth.slice(0, 10);
 	const topAppids = new Set(topGrowth.map(r => r.appid));
 	const filteredPool = allGrowth.filter(r => r.rank <= TOP_RANK_LIMIT).slice(0, 10);
-	const exGrowth = filteredPool.filter(r => !topAppids.has(r.appid));
+	const windowExGrowth = filteredPool.filter(r => !topAppids.has(r.appid));
+
+	const listedAppids = new Set([...topAppids, ...windowExGrowth.map(r => r.appid)]);
+	const caughtUp = allGrowth.filter(r => r.rank <= CATCH_RANK_LIMIT && r.rankChange > CATCH_MIN_GROWTH && !listedAppids.has(r.appid));
+
+	const exGrowth = [...windowExGrowth, ...caughtUp].sort((a, b) => b.rankChange - a.rankChange);
 	const highlightAppids = new Set(filteredPool.filter(r => topAppids.has(r.appid)).map(r => r.appid));
 
 	const infos = new Map();
