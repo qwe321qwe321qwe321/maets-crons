@@ -44,6 +44,18 @@ async function fetchSteamAppName(appid) {
 	return json[appid]?.success ? (json[appid].data?.name ?? null) : null;
 }
 
+async function fetchSteamAppTags(appid, limit = 5) {
+	const res = await fetch(`https://steamspy.com/api.php?request=appdetails&appid=${appid}`);
+	if (!res.ok) return [];
+	const json = await res.json();
+	const tags = json?.tags;
+	if (!tags || Array.isArray(tags)) return [];
+	return Object.entries(tags)
+		.sort((a, b) => b[1] - a[1])
+		.slice(0, limit)
+		.map(([tag]) => tag);
+}
+
 function fmt(n) {
 	return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
@@ -81,8 +93,11 @@ async function main() {
 	}
 
 	const names = new Map();
+	const tags = new Map();
 	for (const { appid } of topGrowth) {
-		names.set(appid, await fetchSteamAppName(appid));
+		const [name, appTags] = await Promise.all([fetchSteamAppName(appid), fetchSteamAppTags(appid)]);
+		names.set(appid, name);
+		tags.set(appid, appTags);
 	}
 
 	const unixTs = Math.floor(Date.now() / 1000);
@@ -91,11 +106,12 @@ async function main() {
 
 	const lines = topGrowth.map(({ appid, rank, prevRank, rankChange }, i) => {
 		const name = names.get(appid) ?? appid;
-		const titleLine = `**${i + 1}. [${name}](https://store.steampowered.com/app/${appid}/)** \`${appid}\``;
 		const rankStr = prevRank != null
 			? `#${fmt(prevRank)} → #${fmt(rank)} (▲${fmt(rankChange)})`
 			: `New entry → #${fmt(rank)} (+${fmt(rankChange)})`;
-		return `${titleLine}\n🎯 ${rankStr}`;
+		const appTags = tags.get(appid);
+		const tagStr = appTags?.length ? ` · ${appTags.join(', ')}` : '';
+		return `**${i + 1}. [${name}](https://store.steampowered.com/app/${appid}/)** — ${rankStr}${tagStr}`;
 	});
 
 	const messages = [];
