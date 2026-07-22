@@ -110,9 +110,9 @@ async function main() {
 		const name = names.get(appid) ?? appid;
 		const rankStr = prevRank != null
 			? `#${fmt(prevRank)} → #${fmt(rank)} (▲${fmt(rankChange)})`
-			: `New entry → #${fmt(rank)} (▲${fmt(rankChange)})`;
+			: `🆕 → #${fmt(rank)} (▲${fmt(rankChange)})`;
 		const appTags = tags.get(appid);
-		const titleLine = `**${i + 1}. [${name}](https://store.steampowered.com/app/${appid}/)**\n🎯 ${rankStr}`;
+		const titleLine = `**${i + 1}. [${name}](https://store.steampowered.com/app/${appid}/)** 🎯 ${rankStr}`;
 		if (!appTags?.length) return titleLine;
 		return `${titleLine}\n-# ${appTags.join(' · ')}`;
 	});
