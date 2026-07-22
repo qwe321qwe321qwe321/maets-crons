@@ -19,7 +19,7 @@ async function d1(sql, params = []) {
 	return json.result[0].results;
 }
 
-async function fetchTopGrowth(limit = 10) {
+async function fetchGrowth() {
 	const res = await fetch('https://raw.githubusercontent.com/qwe321qwe321qwe321/maets-rank-cron/refs/heads/main/wishlist_rank_growth.csv');
 	if (!res.ok) throw new Error(`Failed to fetch wishlist_rank_growth.csv: ${res.status}`);
 	const text = await res.text();
@@ -34,7 +34,7 @@ async function fetchTopGrowth(limit = 10) {
 			rankChange: parseInt(rankChange, 10),
 		});
 	}
-	return rows.slice(0, limit);
+	return rows;
 }
 
 async function fetchSteamAppInfo(appid) {
@@ -113,15 +113,21 @@ async function main() {
 		return;
 	}
 
-	const topGrowth = await fetchTopGrowth(10);
-	if (topGrowth.length === 0) {
+	const allGrowth = await fetchGrowth();
+	if (allGrowth.length === 0) {
 		console.log('No growth data available, skipping.');
 		return;
 	}
 
+	const TOP_RANK_LIMIT = 3000;
+	const topGrowth = allGrowth.slice(0, 10);
+	const topAppids = new Set(topGrowth.map(r => r.appid));
+	const exGrowth = allGrowth.filter(r => r.rank <= TOP_RANK_LIMIT && !topAppids.has(r.appid)).slice(0, 10);
+	const highlightAppids = new Set(topGrowth.filter(r => r.rank <= TOP_RANK_LIMIT).map(r => r.appid));
+
 	const infos = new Map();
 	const tags = new Map();
-	for (const { appid } of topGrowth) {
+	for (const { appid } of [...topGrowth, ...exGrowth]) {
 		const [info, appTags] = await Promise.all([fetchSteamAppInfo(appid), fetchSteamAppTags(appid)]);
 		infos.set(appid, info);
 		tags.set(appid, appTags);
@@ -131,20 +137,26 @@ async function main() {
 	const isoDate = new Date().toISOString();
 	const header = `**📈 Steam WL Growth Rank Watch · ${isoDate}**\n<t:${unixTs}:F>`;
 
-	const lines = topGrowth.map(({ appid, rank, prevRank, rankChange }, i) => {
+	const renderEntry = (label, { appid, rank, prevRank, rankChange }, highlight) => {
 		const { name, releaseDate } = infos.get(appid) ?? {};
 		const rankStr = prevRank != null
 			? `#${fmt(prevRank)} → #${fmt(rank)} (▲${fmt(rankChange)})`
 			: `## → #${fmt(rank)} (▲${fmt(rankChange)})`;
 		const appTags = tags.get(appid);
-		let msg = `**${i + 1}. [${name ?? appid}](https://store.steampowered.com/app/${appid}/)** 🎯 ${rankStr}`;
+		const marker = highlight ? ' 💎' : '';
+		let msg = `**${label}. [${name ?? appid}](https://store.steampowered.com/app/${appid}/)**${marker} 🎯 ${rankStr}`;
 		if (appTags?.length) msg += `\n-# ${appTags.join(' · ')}`;
 		if (releaseDate) {
 			const rel = relativeReleaseDate(releaseDate);
 			msg += `\n-# 🗓️ ${releaseDate}${rel ? ` (${rel})` : ''}`;
 		}
 		return msg;
-	});
+	};
+
+	const lines = [
+		...topGrowth.map((row, i) => renderEntry(`${i + 1}`, row, highlightAppids.has(row.appid))),
+		...exGrowth.map((row, i) => renderEntry(`Ex.${i + 1}`, row, false)),
+	];
 
 	const messages = [];
 	let current = header;
