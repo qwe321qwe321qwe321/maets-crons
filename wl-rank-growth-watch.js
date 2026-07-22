@@ -37,11 +37,15 @@ async function fetchTopGrowth(limit = 10) {
 	return rows.slice(0, limit);
 }
 
-async function fetchSteamAppName(appid) {
+async function fetchSteamAppInfo(appid) {
 	const res = await fetch(`https://store.steampowered.com/api/appdetails?appids=${appid}`);
-	if (!res.ok) return null;
+	if (!res.ok) return { name: null, releaseDate: null };
 	const json = await res.json();
-	return json[appid]?.success ? (json[appid].data?.name ?? null) : null;
+	const data = json[appid]?.success ? json[appid].data : null;
+	return {
+		name: data?.name ?? null,
+		releaseDate: data?.release_date?.date || null,
+	};
 }
 
 async function fetchSteamAppTags(appid, limit = 5) {
@@ -94,11 +98,11 @@ async function main() {
 		return;
 	}
 
-	const names = new Map();
+	const infos = new Map();
 	const tags = new Map();
 	for (const { appid } of topGrowth) {
-		const [name, appTags] = await Promise.all([fetchSteamAppName(appid), fetchSteamAppTags(appid)]);
-		names.set(appid, name);
+		const [info, appTags] = await Promise.all([fetchSteamAppInfo(appid), fetchSteamAppTags(appid)]);
+		infos.set(appid, info);
 		tags.set(appid, appTags);
 	}
 
@@ -107,14 +111,15 @@ async function main() {
 	const header = `**📈 Steam WL Growth Rank Watch · ${isoDate}**\n<t:${unixTs}:F>`;
 
 	const lines = topGrowth.map(({ appid, rank, prevRank, rankChange }, i) => {
-		const name = names.get(appid) ?? appid;
+		const { name, releaseDate } = infos.get(appid) ?? {};
 		const rankStr = prevRank != null
 			? `#${fmt(prevRank)} → #${fmt(rank)} (▲${fmt(rankChange)})`
-			: `🆕 → #${fmt(rank)} (▲${fmt(rankChange)})`;
+			: `## → #${fmt(rank)} (▲${fmt(rankChange)})`;
 		const appTags = tags.get(appid);
-		const titleLine = `**${i + 1}. [${name}](https://store.steampowered.com/app/${appid}/)** 🎯 ${rankStr}`;
-		if (!appTags?.length) return titleLine;
-		return `${titleLine}\n-# ${appTags.join(' · ')}`;
+		let msg = `**${i + 1}. [${name ?? appid}](https://store.steampowered.com/app/${appid}/)** 🎯 ${rankStr}`;
+		if (appTags?.length) msg += `\n-# ${appTags.join(' · ')}`;
+		if (releaseDate) msg += `\n-# 🗓️ ${releaseDate}`;
+		return msg;
 	});
 
 	const messages = [];
