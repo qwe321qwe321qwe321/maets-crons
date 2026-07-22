@@ -73,6 +73,7 @@ function relativeReleaseDate(dateStr) {
 	if (!isDayMonthYear && !isMonthDayYear && !isMonthYear) return null;
 	const date = new Date(dateStr);
 	if (isNaN(date)) return null;
+	if (isMonthYear) date.setMonth(date.getMonth() + 1, 0);
 
 	const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
 	const diffDays = Math.round((startOfDay(date) - startOfDay(new Date())) / 86400000);
