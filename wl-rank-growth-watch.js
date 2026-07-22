@@ -67,7 +67,10 @@ function fmt(n) {
 }
 
 function relativeReleaseDate(dateStr) {
-	if (!/^\d{1,2}\s+[A-Za-z]{3,},?\s+\d{4}$/.test(dateStr) && !/^[A-Za-z]{3,}\s+\d{4}$/.test(dateStr)) return null;
+	const isDayMonthYear = /^\d{1,2}\s+[A-Za-z]{3,},?\s+\d{4}$/.test(dateStr);
+	const isMonthDayYear = /^[A-Za-z]{3,}\s+\d{1,2},?\s+\d{4}$/.test(dateStr);
+	const isMonthYear = /^[A-Za-z]{3,}\s+\d{4}$/.test(dateStr);
+	if (!isDayMonthYear && !isMonthDayYear && !isMonthYear) return null;
 	const date = new Date(dateStr);
 	if (isNaN(date)) return null;
 
