@@ -122,8 +122,9 @@ async function main() {
 	const TOP_RANK_LIMIT = 3000;
 	const topGrowth = allGrowth.slice(0, 10);
 	const topAppids = new Set(topGrowth.map(r => r.appid));
-	const exGrowth = allGrowth.filter(r => r.rank <= TOP_RANK_LIMIT && !topAppids.has(r.appid)).slice(0, 10);
-	const highlightAppids = new Set(topGrowth.filter(r => r.rank <= TOP_RANK_LIMIT).map(r => r.appid));
+	const filteredPool = allGrowth.filter(r => r.rank <= TOP_RANK_LIMIT).slice(0, 10);
+	const exGrowth = filteredPool.filter(r => !topAppids.has(r.appid));
+	const highlightAppids = new Set(filteredPool.filter(r => topAppids.has(r.appid)).map(r => r.appid));
 
 	const infos = new Map();
 	const tags = new Map();
