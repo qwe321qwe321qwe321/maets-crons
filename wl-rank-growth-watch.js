@@ -66,6 +66,23 @@ function fmt(n) {
 	return n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
+function relativeReleaseDate(dateStr) {
+	if (!/^\d{1,2}\s+[A-Za-z]{3,},?\s+\d{4}$/.test(dateStr) && !/^[A-Za-z]{3,}\s+\d{4}$/.test(dateStr)) return null;
+	const date = new Date(dateStr);
+	if (isNaN(date)) return null;
+
+	const startOfDay = d => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+	const diffDays = Math.round((startOfDay(date) - startOfDay(new Date())) / 86400000);
+	if (diffDays === 0) return 'today';
+
+	const abs = Math.abs(diffDays);
+	const dir = diffDays > 0 ? 'in ' : '';
+	const suffix = diffDays < 0 ? ' ago' : '';
+	if (abs < 30) return `${dir}${abs}d${suffix}`;
+	if (abs < 365) return `${dir}${Math.round(abs / 30)}mo${suffix}`;
+	return `${dir}${Math.round(abs / 365)}y${suffix}`;
+}
+
 async function sendMessage(channelId, content) {
 	const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
 		method: 'POST',
@@ -118,7 +135,10 @@ async function main() {
 		const appTags = tags.get(appid);
 		let msg = `**${i + 1}. [${name ?? appid}](https://store.steampowered.com/app/${appid}/)** 🎯 ${rankStr}`;
 		if (appTags?.length) msg += `\n-# ${appTags.join(' · ')}`;
-		if (releaseDate) msg += `\n-# 🗓️ ${releaseDate}`;
+		if (releaseDate) {
+			const rel = relativeReleaseDate(releaseDate);
+			msg += `\n-# 🗓️ ${releaseDate}${rel ? ` (${rel})` : ''}`;
+		}
 		return msg;
 	});
 
