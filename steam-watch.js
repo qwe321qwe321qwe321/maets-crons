@@ -36,17 +36,24 @@ async function fetchSteamAppInfo(appid) {
 	};
 }
 
+// store.steampowered.com/appreviews now 302s to the store homepage, so use the store browse API instead.
 async function fetchSteamReviews(appid) {
+	const input = {
+		ids: [{ appid }],
+		context: { language: 'english', country_code: 'US' },
+		data_request: { include_reviews: true },
+	};
 	const res = await fetch(
-		`https://store.steampowered.com/appreviews/${appid}?json=1&num_per_page=0&language=all&purchase_type=all&filter_offtopic_activity=0`
+		`https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json=${encodeURIComponent(JSON.stringify(input))}`
 	);
 	if (!res.ok) return null;
-	const json = await res.json();
-	if (json.success !== 1 || !json.query_summary) return null;
+	const json = await res.json().catch(() => null);
+	const summary = json?.response?.store_items?.[0]?.reviews?.summary_filtered;
+	if (!summary) return null;
 	return {
-		total: json.query_summary.total_reviews,
-		positive: json.query_summary.total_positive,
-		scoreDesc: json.query_summary.review_score_desc,
+		total: summary.review_count,
+		percentPositive: summary.percent_positive,
+		scoreDesc: summary.review_score_label,
 	};
 }
 
@@ -259,7 +266,7 @@ async function runDailyReport(filterChannelId = '') {
 	for (const { appid, comingSoon, releaseDate, reviews, prev, prev7d, followerHistoryRows } of baseData) {
 		const followers = followerMap.get(appid) ?? null;
 		const reviewScore = reviews && reviews.total > 0
-			? Math.round((reviews.positive / reviews.total) * 100)
+			? reviews.percentPositive
 			: null;
 
 		await d1(
