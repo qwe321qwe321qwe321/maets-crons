@@ -76,16 +76,17 @@ async function renderTile(label, { appid, rank, prevRank, rankChange }, capsule,
 		? sharp(capsule).resize(TILE_W, TILE_H, { fit: 'cover' })
 		: sharp({ create: { width: TILE_W, height: TILE_H, channels: 3, background: '#2a2f3a' } });
 	const rankStr = `${prevRank != null ? `#${fmt(prevRank)}` : '##'} → #${fmt(rank)}  ▲${fmt(rankChange)}`;
+	const badgeW = label.length * 12 + 20;
 	const overlay = Buffer.from(`<svg width="${TILE_W}" height="${TILE_H}" xmlns="http://www.w3.org/2000/svg">
 		<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
 			<stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.85"/>
 		</linearGradient></defs>
 		<rect x="0" y="${TILE_H - 56}" width="${TILE_W}" height="56" fill="url(#g)"/>
-		<rect x="0" y="0" width="${label.length * 12 + 20}" height="28" fill="#000" fill-opacity="0.75"/>
+		<rect x="0" y="0" width="${badgeW + (highlight ? 20 : 0)}" height="28" fill="#000" fill-opacity="0.75"/>
 		<text x="10" y="20" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="bold" fill="#fff">${escapeXml(label)}</text>
-		${highlight ? `<rect x="2" y="2" width="${TILE_W - 4}" height="${TILE_H - 4}" fill="none" stroke="#5de0ff" stroke-width="4"/>
-		<polygon points="${TILE_W - 24},8 ${TILE_W - 8},24 ${TILE_W - 24},44 ${TILE_W - 40},24" fill="#5de0ff" stroke="#fff" stroke-width="2"/>
-		<polygon points="${TILE_W - 40},24 ${TILE_W - 8},24 ${TILE_W - 24},44" fill="#2aa8d6"/>` : ''}
+		${highlight ? `<rect x="2" y="2" width="${TILE_W - 4}" height="${TILE_H - 4}" fill="none" stroke="#5de0ff" stroke-width="4"/>` : ''}
+		${highlight ? `<polygon points="${badgeW + 2},4 ${badgeW + 12},14 ${badgeW + 2},24 ${badgeW - 8},14" fill="#5de0ff" stroke="#fff" stroke-width="1.5"/>
+		<polygon points="${badgeW - 8},14 ${badgeW + 12},14 ${badgeW + 2},24" fill="#2aa8d6"/>` : ''}
 		<text x="10" y="${TILE_H - 10}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="bold" fill="#7CFC9A">${escapeXml(rankStr)}</text>
 	</svg>`);
 	return base.composite([{ input: overlay }]).jpeg({ quality: 85 }).toBuffer();
