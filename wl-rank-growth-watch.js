@@ -71,7 +71,7 @@ async function fetchCapsule(appid, headerImage) {
 	return null;
 }
 
-async function renderTile(label, { appid, rank, prevRank, rankChange }, capsule) {
+async function renderTile(label, { appid, rank, prevRank, rankChange }, capsule, highlight) {
 	const base = capsule
 		? sharp(capsule).resize(TILE_W, TILE_H, { fit: 'cover' })
 		: sharp({ create: { width: TILE_W, height: TILE_H, channels: 3, background: '#2a2f3a' } });
@@ -83,6 +83,9 @@ async function renderTile(label, { appid, rank, prevRank, rankChange }, capsule)
 		<rect x="0" y="${TILE_H - 56}" width="${TILE_W}" height="56" fill="url(#g)"/>
 		<rect x="0" y="0" width="${label.length * 12 + 20}" height="28" fill="#000" fill-opacity="0.75"/>
 		<text x="10" y="20" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="bold" fill="#fff">${escapeXml(label)}</text>
+		${highlight ? `<rect x="2" y="2" width="${TILE_W - 4}" height="${TILE_H - 4}" fill="none" stroke="#5de0ff" stroke-width="4"/>
+		<polygon points="${TILE_W - 24},8 ${TILE_W - 8},24 ${TILE_W - 24},44 ${TILE_W - 40},24" fill="#5de0ff" stroke="#fff" stroke-width="2"/>
+		<polygon points="${TILE_W - 40},24 ${TILE_W - 8},24 ${TILE_W - 24},44" fill="#2aa8d6"/>` : ''}
 		<text x="10" y="${TILE_H - 10}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="bold" fill="#7CFC9A">${escapeXml(rankStr)}</text>
 	</svg>`);
 	return base.composite([{ input: overlay }]).jpeg({ quality: 85 }).toBuffer();
@@ -96,8 +99,8 @@ async function buildCollage(groups) {
 		group.forEach((entry, i) => placed.push({ entry, col: i % TILE_COLS, gridRow: rows + Math.floor(i / TILE_COLS) }));
 		rows += Math.ceil(group.length / TILE_COLS);
 	}
-	const tiles = await Promise.all(placed.map(async ({ entry: { label, row, headerImage }, col, gridRow }) => ({
-		input: await renderTile(label, row, await fetchCapsule(row.appid, headerImage)),
+	const tiles = await Promise.all(placed.map(async ({ entry: { label, row, headerImage, highlight }, col, gridRow }) => ({
+		input: await renderTile(label, row, await fetchCapsule(row.appid, headerImage), highlight),
 		left: col * TILE_W,
 		top: gridRow * TILE_H,
 	})));
@@ -248,7 +251,7 @@ async function main() {
 
 	let collage = null;
 	try {
-		const toEntry = prefix => (row, i) => ({ label: `${prefix}${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage });
+		const toEntry = prefix => (row, i) => ({ label: `${prefix}${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage, highlight: highlightAppids.has(row.appid) });
 		collage = await buildCollage([
 			topGrowth.map(toEntry('')),
 			exGrowth.map(toEntry('Ex.')),
