@@ -253,7 +253,7 @@ async function main() {
 
 	for (const channelId of channelIds) {
 		for (const [i, message] of messages.entries()) {
-			await sendMessage(channelId, message, i === 0 ? collage : null);
+			await sendMessage(channelId, message, i === messages.length - 1 ? collage : null);
 		}
 	}
 	console.log('Done.');
