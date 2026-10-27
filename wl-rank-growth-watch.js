@@ -88,16 +88,21 @@ async function renderTile(label, { appid, rank, prevRank, rankChange }, capsule)
 	return base.composite([{ input: overlay }]).jpeg({ quality: 85 }).toBuffer();
 }
 
-async function buildCollage(entries) {
-	const rows = Math.ceil(entries.length / TILE_COLS);
-	const tiles = await Promise.all(entries.map(async ({ label, row, headerImage }) =>
-		renderTile(label, row, await fetchCapsule(row.appid, headerImage))));
+// Each group starts on a fresh row.
+async function buildCollage(groups) {
+	const placed = [];
+	let rows = 0;
+	for (const group of groups) {
+		group.forEach((entry, i) => placed.push({ entry, col: i % TILE_COLS, gridRow: rows + Math.floor(i / TILE_COLS) }));
+		rows += Math.ceil(group.length / TILE_COLS);
+	}
+	const tiles = await Promise.all(placed.map(async ({ entry: { label, row, headerImage }, col, gridRow }) => ({
+		input: await renderTile(label, row, await fetchCapsule(row.appid, headerImage)),
+		left: col * TILE_W,
+		top: gridRow * TILE_H,
+	})));
 	return sharp({ create: { width: TILE_W * TILE_COLS, height: TILE_H * rows, channels: 3, background: '#171a21' } })
-		.composite(tiles.map((input, i) => ({
-			input,
-			left: (i % TILE_COLS) * TILE_W,
-			top: Math.floor(i / TILE_COLS) * TILE_H,
-		})))
+		.composite(tiles)
 		.jpeg({ quality: 85 })
 		.toBuffer();
 }
@@ -243,9 +248,10 @@ async function main() {
 
 	let collage = null;
 	try {
+		const toEntry = prefix => (row, i) => ({ label: `${prefix}${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage });
 		collage = await buildCollage([
-			...topGrowth.map((row, i) => ({ label: `${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage })),
-			...exGrowth.map((row, i) => ({ label: `Ex.${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage })),
+			topGrowth.map(toEntry('')),
+			exGrowth.map(toEntry('Ex.')),
 		]);
 	} catch (err) {
 		console.error('Collage build failed, sending text only:', err);
