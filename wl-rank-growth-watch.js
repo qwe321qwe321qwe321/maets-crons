@@ -1,3 +1,5 @@
+const sharp = require('sharp');
+
 const CF_API_TOKEN = process.env.CF_API_TOKEN;
 const CF_ACCOUNT_ID = process.env.CF_ACCOUNT_ID;
 const CF_D1_DATABASE_ID = process.env.CF_D1_DATABASE_ID;
@@ -45,7 +47,59 @@ async function fetchSteamAppInfo(appid) {
 	return {
 		name: data?.name ?? null,
 		releaseDate: data?.release_date?.date || null,
+		headerImage: data?.header_image ?? null,
 	};
+}
+
+const TILE_W = 400;
+const TILE_H = 187;
+const TILE_COLS = 3;
+
+const escapeXml = s => s.replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+
+async function fetchCapsule(appid, headerImage) {
+	const urls = [
+		headerImage,
+		`https://shared.fastly.steamstatic.com/store_item_assets/steam/apps/${appid}/header.jpg`,
+	].filter(Boolean);
+	for (const url of urls) {
+		try {
+			const res = await fetch(url);
+			if (res.ok) return Buffer.from(await res.arrayBuffer());
+		} catch { /* try next */ }
+	}
+	return null;
+}
+
+async function renderTile(label, { appid, rank, prevRank, rankChange }, capsule) {
+	const base = capsule
+		? sharp(capsule).resize(TILE_W, TILE_H, { fit: 'cover' })
+		: sharp({ create: { width: TILE_W, height: TILE_H, channels: 3, background: '#2a2f3a' } });
+	const rankStr = `${prevRank != null ? `#${fmt(prevRank)}` : '##'} → #${fmt(rank)}  ▲${fmt(rankChange)}`;
+	const overlay = Buffer.from(`<svg width="${TILE_W}" height="${TILE_H}" xmlns="http://www.w3.org/2000/svg">
+		<defs><linearGradient id="g" x1="0" y1="0" x2="0" y2="1">
+			<stop offset="0" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity="0.85"/>
+		</linearGradient></defs>
+		<rect x="0" y="${TILE_H - 56}" width="${TILE_W}" height="56" fill="url(#g)"/>
+		<rect x="0" y="0" width="${label.length * 12 + 20}" height="28" fill="#000" fill-opacity="0.75"/>
+		<text x="10" y="20" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="bold" fill="#fff">${escapeXml(label)}</text>
+		<text x="10" y="${TILE_H - 10}" font-family="DejaVu Sans, sans-serif" font-size="16" font-weight="bold" fill="#7CFC9A">${escapeXml(rankStr)}</text>
+	</svg>`);
+	return base.composite([{ input: overlay }]).jpeg({ quality: 85 }).toBuffer();
+}
+
+async function buildCollage(entries) {
+	const rows = Math.ceil(entries.length / TILE_COLS);
+	const tiles = await Promise.all(entries.map(async ({ label, row, headerImage }) =>
+		renderTile(label, row, await fetchCapsule(row.appid, headerImage))));
+	return sharp({ create: { width: TILE_W * TILE_COLS, height: TILE_H * rows, channels: 3, background: '#171a21' } })
+		.composite(tiles.map((input, i) => ({
+			input,
+			left: (i % TILE_COLS) * TILE_W,
+			top: Math.floor(i / TILE_COLS) * TILE_H,
+		})))
+		.jpeg({ quality: 85 })
+		.toBuffer();
 }
 
 async function fetchSteamAppTags(appid, limit = 5) {
@@ -87,14 +141,21 @@ function relativeReleaseDate(dateStr) {
 	return `${dir}${Math.round(abs / 365)}y${suffix}`;
 }
 
-async function sendMessage(channelId, content) {
+async function sendMessage(channelId, content, image = null) {
+	const headers = { 'Authorization': `Bot ${DISCORD_TOKEN}` };
+	let body;
+	if (image) {
+		body = new FormData();
+		body.append('payload_json', JSON.stringify({ content, flags: 4 }));
+		body.append('files[0]', new Blob([image], { type: 'image/jpeg' }), 'wl_growth_capsules.jpg');
+	} else {
+		headers['Content-Type'] = 'application/json';
+		body = JSON.stringify({ content, flags: 4 });
+	}
 	const res = await fetch(`https://discord.com/api/v10/channels/${channelId}/messages`, {
 		method: 'POST',
-		headers: {
-			'Authorization': `Bot ${DISCORD_TOKEN}`,
-			'Content-Type': 'application/json',
-		},
-		body: JSON.stringify({ content, flags: 4 }),
+		headers,
+		body,
 	});
 	if (!res.ok) {
 		const text = await res.text();
@@ -180,9 +241,19 @@ async function main() {
 	}
 	messages.push(current);
 
+	let collage = null;
+	try {
+		collage = await buildCollage([
+			...topGrowth.map((row, i) => ({ label: `${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage })),
+			...exGrowth.map((row, i) => ({ label: `Ex.${i + 1}`, row, headerImage: infos.get(row.appid)?.headerImage })),
+		]);
+	} catch (err) {
+		console.error('Collage build failed, sending text only:', err);
+	}
+
 	for (const channelId of channelIds) {
-		for (const message of messages) {
-			await sendMessage(channelId, message);
+		for (const [i, message] of messages.entries()) {
+			await sendMessage(channelId, message, i === 0 ? collage : null);
 		}
 	}
 	console.log('Done.');
